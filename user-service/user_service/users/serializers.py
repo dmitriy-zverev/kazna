@@ -20,7 +20,9 @@ class UserCreateSerializer(BaseUserCreateSerializer):
         required=True,
         allow_blank=False,
         max_length=150,
-        validators=[UniqueValidator(queryset=User.objects.all(), message="User already exists")],
+        validators=[
+            UniqueValidator(queryset=User.objects.all(), message="User already exists")
+        ],
     )
 
     class Meta(BaseUserCreateSerializer.Meta):
@@ -36,7 +38,9 @@ class UserCreateSerializer(BaseUserCreateSerializer):
 
     def validate_username(self, value):
         if not re.match(r"^[\w.@+-]+\Z", value):
-            raise serializers.ValidationError({"username": "Contains invalid characters"})
+            raise serializers.ValidationError(
+                {"username": "Contains invalid characters"}
+            )
         return value
 
 

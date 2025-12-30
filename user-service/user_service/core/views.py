@@ -17,9 +17,18 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def get_serializer_class(self):
-        return UserSerializer if self.action in ("list", "retrieve") else UserCreateSerializer
+        return (
+            UserSerializer
+            if self.action in ("list", "retrieve")
+            else UserCreateSerializer
+        )
 
-    @action(detail=False, methods=["get", "patch"], url_path="me", permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=False,
+        methods=["get", "patch"],
+        url_path="me",
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def me(self, request):
         if request.method.lower() == "get":
             return Response(UserSerializer(request.user).data)
@@ -29,7 +38,12 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer.save()
         return Response(serializer.data)
 
-    @action(detail=False, methods=["post"], url_path="set_password", permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="set_password",
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def set_password(self, request):
         serializer = SetPasswordSerializer(
             data=request.data,

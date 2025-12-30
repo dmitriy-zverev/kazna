@@ -1,4 +1,4 @@
-.PHONY: run makemigrations migrate lint test test-cov
+.PHONY: run makemigrations migrate shell lint test test-cov
 run:
 	python3 user_service/manage.py runserver
 

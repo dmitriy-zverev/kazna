@@ -162,7 +162,7 @@ EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
 
 EMAIL_FILE_PATH = BASE_DIR / "sent_emails"
 
-DEFAULT_FROM_EMAIL = "no-reply@foodgram.com"
+DEFAULT_FROM_EMAIL = "no-reply@kazna.com"
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost",
