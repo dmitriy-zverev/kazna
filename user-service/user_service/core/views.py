@@ -19,7 +19,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         return (
             UserSerializer
-            if self.action in ("list", "retrieve")
+            if self.action in ["list", "retrieve"]
             else UserCreateSerializer
         )
 
@@ -30,10 +30,10 @@ class UserViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def me(self, request):
-        if request.method.lower() == "get":
+        if self.action in ["list", "retrieve"]:
             return Response(UserSerializer(request.user).data)
 
-        serializer = UserCreateSerializer(request.user, data=request.data, partial=True)
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)

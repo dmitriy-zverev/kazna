@@ -27,7 +27,17 @@ class UserCreateSerializer(BaseUserCreateSerializer):
 
     class Meta(BaseUserCreateSerializer.Meta):
         model = User
-        fields = ("id", "email", "username", "password", "first_name", "last_name")
+        fields = (
+            "id",
+            "email",
+            "username",
+            "password",
+            "first_name",
+            "last_name",
+            "city",
+            "country",
+            "zip_code",
+        )
         extra_kwargs = {
             "password": {
                 "write_only": True,
@@ -47,4 +57,13 @@ class UserCreateSerializer(BaseUserCreateSerializer):
 class UserSerializer(BaseUserSerializer):
     class Meta(BaseUserSerializer.Meta):
         model = User
-        fields = ("id", "email", "username", "first_name", "last_name")
+        fields = (
+            "id",
+            "email",
+            "username",
+            "first_name",
+            "last_name",
+            "city",
+            "country",
+            "zip_code",
+        )

@@ -11,6 +11,9 @@ migrate:
 shell:
 	python3 user_service/manage.py shell
 
+db-user-service:
+	psql -d kazna_user_service
+
 lint:
 	pre-commit run --all-files
 
