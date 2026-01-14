@@ -3,10 +3,14 @@ from djoser.serializers import SetPasswordSerializer
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from users.models import Group
 from users.serializers import (
+    GroupSerializer,
     UserCreateSerializer,
     UserSerializer,
 )
+
+from .permissions import IsAdminOrModerator
 
 User = get_user_model()
 
@@ -19,7 +23,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         return (
             UserSerializer
-            if self.action in ["list", "retrieve"]
+            if self.action in permissions.SAFE_METHODS
             else UserCreateSerializer
         )
 
@@ -30,7 +34,7 @@ class UserViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def me(self, request):
-        if self.action in ["list", "retrieve"]:
+        if self.action in permissions.SAFE_METHODS:
             return Response(UserSerializer(request.user).data)
 
         serializer = UserSerializer(request.user, data=request.data, partial=True)
@@ -58,3 +62,10 @@ class UserViewSet(viewsets.ModelViewSet):
         user.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GroupViewSet(viewsets.ModelViewSet):
+    queryset = Group.objects.all()
+    serializer_class = GroupSerializer
+    permission_classes = [IsAdminOrModerator]
+    http_method_names = ["get"]

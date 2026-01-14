@@ -9,11 +9,13 @@ from drf_spectacular.views import (
 from rest_framework import routers
 
 from .views import (
+    GroupViewSet,
     UserViewSet,
 )
 
 router = routers.DefaultRouter()
 router.register(r"users", UserViewSet, basename="users")
+router.register(r"groups", GroupViewSet, basename="groups")
 
 urlpatterns = [
     path("", include(router.urls)),

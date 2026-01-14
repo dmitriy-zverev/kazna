@@ -10,6 +10,8 @@ from djoser.serializers import (
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
+from .models import Group
+
 User = get_user_model()
 
 
@@ -67,3 +69,12 @@ class UserSerializer(BaseUserSerializer):
             "country",
             "zip_code",
         )
+
+
+class GroupSerializer(serializers.ModelSerializer):
+    user = UserSerializer(required=False)
+
+    class Meta:
+        model = Group
+        fields = ("user_type", "user")
+        read_only_fields = ("user",)

@@ -1,4 +1,4 @@
-.PHONY: run makemigrations migrate shell lint test test-cov
+.PHONY: run makemigrations migrate superuser shell db lint test test-cov
 run:
 	python3 user_service/manage.py runserver
 
@@ -8,10 +8,13 @@ makemigrations:
 migrate:
 	python3 user_service/manage.py migrate
 
+superuser:
+	python3 user_service/manage.py createsuperuser
+
 shell:
 	python3 user_service/manage.py shell
 
-db-user-service:
+db:
 	psql -d kazna_user_service
 
 lint:
