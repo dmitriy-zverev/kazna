@@ -1,4 +1,4 @@
-**User Service** (Django + DRF + PostgreSQL + PyJWT + Redis + Swagger)
+**User Service** (Django + DRF + PostgreSQL + Djoser + Redis + Swagger)
 
 1. **Auth (registration, login, password reset, token refresh)**: Implement user signup with email/username validation and password hashing; login to generate JWT tokens; password reset via email links with token expiry; token refresh to extend sessions without re-login. Use Django's built-in User model extended via AbstractUser, DRF for API endpoints (e.g., serializers for input validation), PostgreSQL for storing user creds securely, PyJWT for encoding/decoding tokens, and Swagger (via drf-spectacular) for API docs. Logic: On register, check uniqueness in DB, hash with Django's make_password; on login, verify with check_password and issue JWT; reset flow sends temp token, verifies on callback. Unhinged note: Don't assume emails always deliver—add retries, but for MVP, one shot is fine if you're not paranoid about spam filters.
 
