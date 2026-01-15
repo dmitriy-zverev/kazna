@@ -8,13 +8,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0003_user_created_at_user_updated_at_group'),
+        ("users", "0003_user_created_at_user_updated_at_group"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='group',
-            name='user',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='group_users', to=settings.AUTH_USER_MODEL, unique=True),
+            model_name="group",
+            name="user",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="group_users",
+                to=settings.AUTH_USER_MODEL,
+                unique=True,
+            ),
         ),
     ]

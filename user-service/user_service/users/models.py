@@ -32,15 +32,14 @@ class User(AbstractUser):
     def is_admin(self):
         if self.is_superuser or self.is_staff:
             return True
-        group = self.group_users.first()
-        print(group)
+        group = self.group_users
         return group.user_type == "admin" if group else False
 
     @property
     def is_moderator(self):
         if self.is_superuser or self.is_staff:
             return True
-        group = self.group_users.first()
+        group = self.group_users
         return group.user_type == "moderator" if group else False
 
 
@@ -48,7 +47,7 @@ class Group(models.Model):
     user_type = models.CharField(
         max_length=10, choices=USER_TYPE_CHOICES, blank=False, null=False
     )
-    user = models.ForeignKey(
+    user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
         blank=False,

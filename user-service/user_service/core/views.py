@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
 from djoser.serializers import SetPasswordSerializer
-from rest_framework import permissions, status, viewsets
+from rest_framework import exceptions, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from users.models import Group
@@ -67,5 +68,21 @@ class UserViewSet(viewsets.ModelViewSet):
 class GroupViewSet(viewsets.ModelViewSet):
     queryset = Group.objects.all()
     serializer_class = GroupSerializer
+    lookup_field = "user"
     permission_classes = [IsAdminOrModerator]
-    http_method_names = ["get"]
+    http_method_names = ["get", "post", "patch"]
+
+    def perform_create(self, serializer):
+        if self.request.user.is_moderator:
+            raise exceptions.PermissionDenied(
+                {"detail": "You cannot perform this action"}
+            )
+        user = get_object_or_404(User, pk=self.request.data["user"])
+        if Group.objects.filter(user=user):
+            raise exceptions.ValidationError({"user": "Already exists"})
+        serializer.save(user=user)
+
+    def perform_update(self, serializer):
+        if self.request.user.is_moderator and self.request.data["user_type"] == "admin":
+            raise exceptions.PermissionDenied("You cannot assign admins")
+        serializer.save()

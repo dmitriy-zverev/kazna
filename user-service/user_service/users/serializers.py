@@ -72,9 +72,14 @@ class UserSerializer(BaseUserSerializer):
 
 
 class GroupSerializer(serializers.ModelSerializer):
-    user = UserSerializer(required=False)
+    user = serializers.StringRelatedField()
 
     class Meta:
         model = Group
         fields = ("user_type", "user")
         read_only_fields = ("user",)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["user"] = UserSerializer(instance.user).data
+        return data
