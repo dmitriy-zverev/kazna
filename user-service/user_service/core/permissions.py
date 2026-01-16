@@ -11,3 +11,13 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
 class IsAdminOrModerator(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_admin or request.user.is_moderator
+
+
+class IsBuyerOrSeller(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_buyer or request.user.is_seller
+
+
+class IsSellerOrReadOnly(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.method in permissions.SAFE_METHODS or request.user.is_seller

@@ -32,15 +32,17 @@ class User(AbstractUser):
     def is_admin(self):
         if self.is_superuser or self.is_staff:
             return True
-        group = self.group_users
-        return group.user_type == "admin" if group else False
+        return self.group_users.user_type == "admin" if self.group_users else False
 
     @property
     def is_moderator(self):
         if self.is_superuser or self.is_staff:
             return True
-        group = self.group_users
-        return group.user_type == "moderator" if group else False
+        return self.group_users.user_type == "moderator" if self.group_users else False
+
+    @property
+    def is_seller(self):
+        return self.group_users.user_type == "seller" if self.group_users else False
 
 
 class Group(models.Model):
