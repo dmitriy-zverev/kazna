@@ -1,9 +1,11 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import AccessToken
 from users.models import Group
 
 User = get_user_model()
@@ -151,6 +153,22 @@ class AuthAndSignalsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
         self.assertIn("refresh", response.data)
+
+    def test_protected_endpoint_rejects_invalid_jwt(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer not-a-valid-token")
+
+        response = self.client.get(reverse("users-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_protected_endpoint_rejects_expired_jwt(self):
+        token = AccessToken.for_user(self.user)
+        token.set_exp(lifetime=timedelta(seconds=-1))
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+
+        response = self.client.get(reverse("users-list"))
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     @patch("core.signals.cache.delete_pattern")
     def test_user_signal_clears_cache(self, delete_pattern_mock):

@@ -20,6 +20,39 @@ User management service for the Kazna platform.
 - JWT authentication enabled (`/api/auth/jwt/create`, `/api/auth/jwt/refresh`, `/api/auth/jwt/verify`).
 - Password change endpoint via custom `set_password` action.
 
+##### JWT quick usage examples
+
+Create tokens:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/jwt/create/ \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"StrongPass123!"}'
+```
+
+Refresh access token:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/jwt/refresh/ \
+  -H "Content-Type: application/json" \
+  -d '{"refresh":"<refresh_token>"}'
+```
+
+Verify token:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/auth/jwt/verify/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<access_token>"}'
+```
+
+Call a protected endpoint:
+
+```bash
+curl http://127.0.0.1:8000/api/users/ \
+  -H "Authorization: Bearer <access_token>"
+```
+
 #### Roles and permissions
 - Role model (`Group`) with `buyer`, `seller`, `moderator`, `admin`.
 - Role helper properties on user (`is_admin`, `is_moderator`, etc.) with safe handling.
