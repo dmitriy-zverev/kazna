@@ -1,6 +1,6 @@
 import re
 
-from core.emailing import send_verification_email
+from core.emailing import dispatch_verification_email
 from django.contrib.auth import get_user_model
 from djoser.serializers import (
     UserCreateSerializer as BaseUserCreateSerializer,
@@ -58,7 +58,7 @@ class UserCreateSerializer(BaseUserCreateSerializer):
 
     def create(self, validated_data):
         user = super().create(validated_data)
-        send_verification_email(user)
+        dispatch_verification_email(user)
         return user
 
 

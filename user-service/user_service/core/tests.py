@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 from users.models import Group
+from users.serializers import UserCreateSerializer
 
 from core import cache_utils
 from core.permissions import (
@@ -19,7 +20,6 @@ from core.permissions import (
     IsSelfOrAdmin,
     IsSellerOrReadOnly,
 )
-from users.serializers import UserCreateSerializer
 
 User = get_user_model()
 
@@ -586,8 +586,8 @@ class EmailingTests(TestCase):
         self.assertIn("http://example.com/verify-email?token=", kwargs["message"])
         self.assertEqual(kwargs["recipient_list"], [user.email])
 
-    @patch("users.serializers.send_verification_email")
-    def test_user_create_serializer_triggers_verification_email(self, send_mock):
+    @patch("users.serializers.dispatch_verification_email")
+    def test_user_create_serializer_triggers_verification_email(self, dispatch_mock):
         serializer = UserCreateSerializer(
             data={
                 "email": "newverify@example.com",
@@ -602,4 +602,71 @@ class EmailingTests(TestCase):
         user = serializer.save()
 
         self.assertTrue(User.objects.filter(pk=user.pk).exists())
-        send_mock.assert_called_once_with(user)
+        dispatch_mock.assert_called_once_with(user)
+
+    @patch("core.emailing.send_verification_email")
+    @patch("core.emailing.send_verification_email_task")
+    @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", True)
+    def test_dispatch_verification_email_uses_async_task_when_enabled(
+        self, task_mock, sync_send_mock
+    ):
+        from core.emailing import dispatch_verification_email
+
+        user = User.objects.create_user(
+            email="async@example.com",
+            username="async_user",
+            password="StrongPass123!",
+            first_name="Async",
+            last_name="User",
+        )
+
+        result = dispatch_verification_email(user)
+
+        self.assertTrue(result)
+        task_mock.delay.assert_called_once_with(user.id)
+        sync_send_mock.assert_not_called()
+
+    @patch("core.emailing.send_verification_email", return_value=True)
+    @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", False)
+    def test_dispatch_verification_email_falls_back_to_sync_when_async_disabled(
+        self, sync_send_mock
+    ):
+        from core.emailing import dispatch_verification_email
+
+        user = User.objects.create_user(
+            email="sync@example.com",
+            username="sync_user",
+            password="StrongPass123!",
+            first_name="Sync",
+            last_name="User",
+        )
+
+        result = dispatch_verification_email(user)
+
+        self.assertTrue(result)
+        sync_send_mock.assert_called_once_with(user)
+
+    @patch("core.emailing.send_verification_email", return_value=True)
+    @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", True)
+    def test_dispatch_verification_email_falls_back_when_async_delay_fails(
+        self, sync_send_mock
+    ):
+        from core.emailing import dispatch_verification_email
+
+        class FailingTask:
+            def delay(self, *_args, **_kwargs):
+                raise RuntimeError("broker is down")
+
+        user = User.objects.create_user(
+            email="fallback@example.com",
+            username="fallback_user",
+            password="StrongPass123!",
+            first_name="Fallback",
+            last_name="User",
+        )
+
+        with patch("core.emailing.send_verification_email_task", FailingTask()):
+            result = dispatch_verification_email(user)
+
+        self.assertTrue(result)
+        sync_send_mock.assert_called_once_with(user)

@@ -128,6 +128,8 @@ Key environment variables:
 - `EMAIL_CONSOLE_BACKEND` (`true/false`)
 - `EMAIL_VERIFICATION_URL` (base URL used in verification link)
 - `EMAIL_PROVIDER_CLASS` (pluggable provider class, default `core.emailing.DjangoEmailProvider`)
+- `EMAIL_ASYNC_ENABLED` (`true/false`)
+- `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
 
 Example local `.env`:
 
@@ -153,6 +155,9 @@ USE_HTTPS=false
 EMAIL_CONSOLE_BACKEND=false
 EMAIL_VERIFICATION_URL=http://127.0.0.1:8000/api/auth/verify-email
 EMAIL_PROVIDER_CLASS=core.emailing.DjangoEmailProvider
+EMAIL_ASYNC_ENABLED=false
+CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//
+CELERY_RESULT_BACKEND=rpc://
 ```
 
 Production baseline:
@@ -167,4 +172,7 @@ Production baseline:
   - file backend by default (`sent_emails/`)
   - optional console backend via `EMAIL_CONSOLE_BACKEND=true`
 - Verification dispatch is abstracted behind `core.emailing` provider interface.
+- Verification dispatch supports async queueing via `dispatch_verification_email()`:
+  - if `EMAIL_ASYNC_ENABLED=true` and Celery task is available, dispatches via task queue
+  - otherwise safely falls back to sync send path
 - For production, switch provider by setting `EMAIL_PROVIDER_CLASS` to a custom class (e.g. SendGrid/SES) without changing registration flow code.

@@ -208,6 +208,11 @@ EMAIL_VERIFICATION_URL = os.getenv(
 EMAIL_PROVIDER_CLASS = os.getenv(
     "EMAIL_PROVIDER_CLASS", "core.emailing.DjangoEmailProvider"
 )
+EMAIL_ASYNC_ENABLED = env_bool("EMAIL_ASYNC_ENABLED", False)
+CELERY_BROKER_URL = os.getenv(
+    "CELERY_BROKER_URL", "amqp://guest:guest@127.0.0.1:5672//"
+)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "rpc://")
 
 CORS_ALLOWED_ORIGINS = [
     *env_list(

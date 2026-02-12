@@ -9,6 +9,12 @@ from django.utils.module_loading import import_string
 logger = logging.getLogger(__name__)
 
 
+try:
+    from .tasks import send_verification_email_task
+except Exception:  # pragma: no cover
+    send_verification_email_task = None
+
+
 class BaseEmailProvider:
     def send_verification_email(self, user):
         raise NotImplementedError
@@ -49,3 +55,16 @@ def send_verification_email(user):
             "Failed to send verification email", extra={"user_id": user.id}
         )
         return False
+
+
+def dispatch_verification_email(user):
+    if getattr(settings, "EMAIL_ASYNC_ENABLED", False) and send_verification_email_task:
+        try:
+            send_verification_email_task.delay(user.id)
+            return True
+        except Exception:
+            logger.exception(
+                "Async email dispatch failed, fallback to sync",
+                extra={"user_id": user.id},
+            )
+    return send_verification_email(user)
