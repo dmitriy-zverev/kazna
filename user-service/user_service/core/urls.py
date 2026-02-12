@@ -20,7 +20,7 @@ router.register(r"groups", GroupViewSet, basename="groups")
 urlpatterns = [
     path("", include(router.urls)),
     path("", include("djoser.urls")),
-    path("auth/", include("djoser.urls.authtoken")),
+    path("auth/", include("djoser.urls.jwt")),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "schema/swagger-ui/",

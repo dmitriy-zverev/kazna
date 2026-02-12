@@ -1,9 +1,78 @@
-**User Service** (Django + DRF + PostgreSQL + Djoser + Redis + Swagger)
+# User Service
 
-1. **Auth (registration, login, password reset, token refresh)**: Implement user signup with email/username validation and password hashing; login to generate JWT tokens; password reset via email links with token expiry; token refresh to extend sessions without re-login. Use Django's built-in User model extended via AbstractUser, DRF for API endpoints (e.g., serializers for input validation), PostgreSQL for storing user creds securely, PyJWT for encoding/decoding tokens, and Swagger (via drf-spectacular) for API docs. Logic: On register, check uniqueness in DB, hash with Django's make_password; on login, verify with check_password and issue JWT; reset flow sends temp token, verifies on callback. Unhinged note: Don't assume emails always deliver—add retries, but for MVP, one shot is fine if you're not paranoid about spam filters.
+User management service for the Kazna platform.
 
-2. **Roles (admin, seller, buyer, moderator with permission checks)**: Define role-based access using groups or custom fields on User model; check permissions in views (e.g., sellers can add products via integration). Use Django's permissions system with DRF's permission_classes, PostgreSQL to store role assignments. Logic: On register, default to 'buyer'; admins assign via API; decorators like @permission_required enforce checks. Logical caveat: Roles sound fancy but can bloat if unused—question if 'moderator' is MVP-essential or just overcomplicating for a basic store.
+## Tech Stack
 
-3. **Caching with Redis (for sessions and frequent profile queries)**: Cache user profiles and sessions to speed up reads. Use Redis via django-redis as backend. Logic: On profile fetch, check Redis first (e.g., key 'user:{id}:profile'), fallback to PostgreSQL if miss, then cache with TTL (e.g., 5min). For sessions, store JWT refresh tokens. Don't take caching for granted—invalidate on updates to avoid stale data bugs.
+- Django + Django REST Framework
+- PostgreSQL
+- Djoser + SimpleJWT (JWT auth)
+- Redis (caching)
+- drf-spectacular (OpenAPI/Swagger)
 
-4. **Celery + RabbitMQ for tasks like email verification or async profile updates**: Queue background jobs for non-blocking ops. Use Celery tasks with RabbitMQ broker. Logic: On register, queue verification email; task sends via Django's send_mail or SMTP. For updates, queue DB writes if sync is risky. MVP: Simple fire-and-forget; add retries later if emails flop often.
+## Current Status
+
+### ✅ Implemented
+
+#### Authentication and users
+- Custom `User` model (`users.User`) with profile fields.
+- Registration and auth flows via Djoser.
+- JWT authentication enabled (`/api/auth/jwt/create`, `/api/auth/jwt/refresh`, `/api/auth/jwt/verify`).
+- Password change endpoint via custom `set_password` action.
+
+#### Roles and permissions
+- Role model (`Group`) with `buyer`, `seller`, `moderator`, `admin`.
+- Role helper properties on user (`is_admin`, `is_moderator`, etc.) with safe handling.
+- Custom permissions in API (including object-level `IsSelfOrAdmin`).
+- Global API default permission is authenticated access, with public registration only.
+
+#### API and docs
+- User and group viewsets under `/api/`.
+- OpenAPI schema and docs endpoints:
+  - `/api/schema/`
+  - `/api/schema/swagger-ui/`
+  - `/api/schema/redoc/`
+
+#### Caching
+- Redis configured as Django cache backend.
+- Read caching for user/group list/detail and `users/me`.
+- Targeted cache invalidation for changed entities (pattern-based, no global clear).
+
+#### Quality baseline
+- Regression test suite in `core/tests.py` covering:
+  - access control,
+  - JWT auth endpoint,
+  - cache invalidation behavior.
+
+## Future Improvements
+
+### 1) Cache architecture cleanup
+- Move cache keys/patterns into shared utilities.
+- Remove duplication between viewsets and signal handlers.
+
+### 2) Auth and security hardening
+- Move all sensitive settings to environment variables (`SECRET_KEY`, `DEBUG`, hosts, CORS).
+- Add stricter production defaults.
+- Expand JWT negative-path tests (expired/invalid tokens).
+
+### 3) Permissions matrix expansion
+- Add explicit tests for all role combinations on all sensitive endpoints.
+- Ensure least-privilege policy remains enforced as endpoints grow.
+
+### 4) Async capabilities
+- Add Celery + RabbitMQ skeleton for background tasks:
+  - email verification,
+  - async profile-related events.
+
+### 5) CI workflow
+- Add CI checks for `pre-commit` + `core.tests` on pull requests.
+
+## Developer Commands
+
+From `user-service/`:
+
+- `make help` – list available targets
+- `make install-hooks` – install pre-commit hooks
+- `make run` – run dev server
+- `make test-core` – run core tests
+- `make check` – lint + core tests

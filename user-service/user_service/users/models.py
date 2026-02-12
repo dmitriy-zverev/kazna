@@ -32,17 +32,25 @@ class User(AbstractUser):
     def is_admin(self):
         if self.is_superuser or self.is_staff:
             return True
-        return self.group_users.user_type == "admin" if self.group_users else False
+        group = getattr(self, "group_users", None)
+        return bool(group and group.user_type == "admin")
 
     @property
     def is_moderator(self):
-        if self.is_superuser or self.is_staff:
+        if self.is_superuser:
             return True
-        return self.group_users.user_type == "moderator" if self.group_users else False
+        group = getattr(self, "group_users", None)
+        return bool(group and group.user_type == "moderator")
 
     @property
     def is_seller(self):
-        return self.group_users.user_type == "seller" if self.group_users else False
+        group = getattr(self, "group_users", None)
+        return bool(group and group.user_type == "seller")
+
+    @property
+    def is_buyer(self):
+        group = getattr(self, "group_users", None)
+        return bool(group and group.user_type == "buyer")
 
 
 class Group(models.Model):
