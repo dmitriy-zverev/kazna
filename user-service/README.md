@@ -179,6 +179,25 @@ make celery-worker
 make celery-beat
 ```
 
+End-to-end async smoke (requires worker + broker running):
+
+```bash
+EMAIL_ASYNC_ENABLED=true make smoke-async-email
+```
+
+Recommended local flow (3 terminals):
+
+```bash
+# terminal 1
+uv run celery -A user_service worker --loglevel=info
+
+# terminal 2
+uv run python user_service/manage.py runserver
+
+# terminal 3
+EMAIL_ASYNC_ENABLED=true make smoke-async-email
+```
+
 Production baseline:
 - set `DEBUG=false`
 - set a strong `SECRET_KEY`

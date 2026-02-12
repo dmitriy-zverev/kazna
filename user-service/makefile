@@ -1,7 +1,7 @@
 PYTHON ?= uv run python
 MANAGE := $(PYTHON) user_service/manage.py
 
-.PHONY: help setup install-hooks run celery-worker celery-beat makemigrations migrate superuser shell db lint format test test-core test-cov check
+.PHONY: help setup install-hooks run celery-worker celery-beat smoke-async-email makemigrations migrate superuser shell db lint format test test-core test-cov check
 
 help:
 	@echo "Available targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  run           - run Django dev server"
 	@echo "  celery-worker - run Celery worker"
 	@echo "  celery-beat   - run Celery beat scheduler"
+	@echo "  smoke-async-email - run end-to-end async email smoke command"
 	@echo "  makemigrations/migrate/superuser/shell"
 	@echo "  lint          - run pre-commit on all files"
 	@echo "  format        - run formatting hooks"
@@ -34,6 +35,9 @@ celery-worker:
 
 celery-beat:
 	uv run celery -A user_service beat --loglevel=info
+
+smoke-async-email:
+	$(MANAGE) smoke_async_email --timeout=30
 
 makemigrations:
 	$(MANAGE) makemigrations

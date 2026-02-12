@@ -45,7 +45,7 @@ Idea: https://roadmap.sh/projects/scalable-ecommerce-platform
     3. **History management (user order logs)**: List orders per user. DB queries with filters. Logic: SELECT with user_id join, paginate. Cache in Redis if frequent.
     4. **Async tasks (integrate with payment and notifications via queues)**: Queue post-placement jobs. Celery with RabbitMQ. Logic: Task triggers payment service call, then notifications on success. MVP: Sequential; parallelize later.
 
-- **Payment Service** (FastAPI + Stripe SDK + RabbitMQ + PostgreSQL for logs)
+- **Payment Service** (FastAPI + Mock Payment Service + RabbitMQ + PostgreSQL for logs)
     1. **Payment processing (charges, refunds via gateways like Stripe/PayPal)**: Handle charge on event. Stripe SDK (stripe-python). Logic: Consume "order_placed", create PaymentIntent, confirm. Store minimal in PostgreSQL (e.g., tx_id).
     2. **Webhook handling (for async confirmations)**: Endpoint for gateway callbacks. FastAPI router. Logic: Verify signature, update order status via call, publish "payment_success". Don't assume webhooks always fire—poll for MVP fallbacks.
     3. **Transaction logging (for audits, minimal DB)**: Log all actions. PostgreSQL table. Logic: Insert on every op with timestamps. Logical: Audits are boring but legally required—don't skimp.
