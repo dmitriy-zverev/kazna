@@ -63,7 +63,7 @@ def dispatch_verification_email(user):
             send_verification_email_task.delay(user.id)
             return True
         except Exception:
-            logger.exception(
+            logger.warning(
                 "Async email dispatch failed, fallback to sync",
                 extra={"user_id": user.id},
             )

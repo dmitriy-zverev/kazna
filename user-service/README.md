@@ -104,11 +104,23 @@ curl http://127.0.0.1:8000/api/users/ \
 
 From `user-service/`:
 
+- `uv sync --dev` – create/update environment from `pyproject.toml`
 - `make help` – list available targets
 - `make install-hooks` – install pre-commit hooks
 - `make run` – run dev server
 - `make test-core` – run core tests
 - `make check` – lint + core tests
+
+## Dependency Management (uv)
+
+- Dependency source of truth is now `pyproject.toml` (`[project.dependencies]` + `dependency-groups.dev`).
+- `requirements.txt` is no longer used.
+- Typical workflow:
+
+```bash
+uv sync --dev
+make test-core
+```
 
 ## Environment Configuration (Operational Hardening)
 
@@ -158,6 +170,13 @@ EMAIL_PROVIDER_CLASS=core.emailing.DjangoEmailProvider
 EMAIL_ASYNC_ENABLED=false
 CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//
 CELERY_RESULT_BACKEND=rpc://
+```
+
+Queue runtime (when using async email dispatch):
+
+```bash
+make celery-worker
+make celery-beat
 ```
 
 Production baseline:

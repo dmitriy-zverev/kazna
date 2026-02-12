@@ -646,10 +646,11 @@ class EmailingTests(TestCase):
         self.assertTrue(result)
         sync_send_mock.assert_called_once_with(user)
 
+    @patch("core.emailing.logger.warning")
     @patch("core.emailing.send_verification_email", return_value=True)
     @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", True)
     def test_dispatch_verification_email_falls_back_when_async_delay_fails(
-        self, sync_send_mock
+        self, sync_send_mock, warning_mock
     ):
         from core.emailing import dispatch_verification_email
 
@@ -670,3 +671,23 @@ class EmailingTests(TestCase):
 
         self.assertTrue(result)
         sync_send_mock.assert_called_once_with(user)
+        warning_mock.assert_called_once()
+
+
+class AsyncTaskTests(TestCase):
+    @patch("core.emailing.send_verification_email", return_value=True)
+    def test_send_verification_email_task_calls_sync_sender(self, send_mock):
+        from core.tasks import send_verification_email_task
+
+        user = User.objects.create_user(
+            email="task@example.com",
+            username="task_user",
+            password="StrongPass123!",
+            first_name="Task",
+            last_name="User",
+        )
+
+        result = send_verification_email_task.run(user.id)
+
+        self.assertTrue(result)
+        send_mock.assert_called_once()
