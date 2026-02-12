@@ -109,3 +109,47 @@ From `user-service/`:
 - `make run` – run dev server
 - `make test-core` – run core tests
 - `make check` – lint + core tests
+
+## Environment Configuration (Operational Hardening)
+
+Key environment variables:
+
+- `SECRET_KEY` (required when `DEBUG=false`)
+- `DEBUG` (`true/false`)
+- `ALLOWED_HOSTS` (comma-separated)
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_HOST`, `DB_PORT`
+- `REDIS_URL`
+- `CORS_ALLOWED_ORIGINS` (comma-separated)
+- `CSRF_TRUSTED_ORIGINS` (comma-separated)
+- `CORS_ALLOW_CREDENTIALS` (`true/false`)
+- `USE_HTTPS` (`true/false`)
+- `SECURE_HSTS_SECONDS`, `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD`
+- `X_FRAME_OPTIONS`, `SECURE_REFERRER_POLICY`
+
+Example local `.env`:
+
+```env
+SECRET_KEY=replace-me
+DEBUG=true
+ALLOWED_HOSTS=127.0.0.1,localhost
+
+POSTGRES_DB=kazna_user_service
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DB_HOST=127.0.0.1
+DB_PORT=5432
+
+REDIS_URL=redis://127.0.0.1:6379/1
+
+CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
+CSRF_TRUSTED_ORIGINS=http://localhost,http://127.0.0.1
+CORS_ALLOW_CREDENTIALS=true
+
+USE_HTTPS=false
+```
+
+Production baseline:
+- set `DEBUG=false`
+- set a strong `SECRET_KEY`
+- set `USE_HTTPS=true` behind reverse proxy/load balancer
+- set restrictive `ALLOWED_HOSTS`, CORS and CSRF origin lists
