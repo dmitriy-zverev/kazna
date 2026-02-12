@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.signing import TimestampSigner
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from rest_framework import status
@@ -396,6 +397,42 @@ class AuthAndSignalsTests(APITestCase):
         self.user.save()
 
         self.assertGreaterEqual(delete_pattern_mock.call_count, 1)
+
+
+class EmailVerificationFlowTests(APITestCase):
+    def test_new_user_is_unverified_by_default(self):
+        user = User.objects.create_user(
+            email="unverified@example.com",
+            username="unverified_user",
+            password="StrongPass123!",
+            first_name="Unverified",
+            last_name="User",
+        )
+
+        self.assertFalse(user.is_verified)
+
+    def test_verify_email_endpoint_sets_is_verified_true(self):
+        user = User.objects.create_user(
+            email="verify-flow@example.com",
+            username="verify_flow_user",
+            password="StrongPass123!",
+            first_name="Verify",
+            last_name="Flow",
+            is_verified=False,
+        )
+        signer = TimestampSigner(salt="user-email-verification")
+        token = signer.sign(str(user.pk))
+
+        response = self.client.get(reverse("verify-email"), {"token": token})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertTrue(user.is_verified)
+
+    def test_verify_email_endpoint_rejects_invalid_token(self):
+        response = self.client.get(reverse("verify-email"), {"token": "invalid-token"})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class PermissionClassTests(TestCase):

@@ -19,6 +19,7 @@ class User(AbstractUser):
     city = models.CharField(max_length=150, blank=True, null=True)
     country = models.CharField(max_length=150, blank=True, null=True)
     zip_code = models.PositiveIntegerField(blank=True, null=True)
+    is_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

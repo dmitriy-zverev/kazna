@@ -177,6 +177,12 @@ CELERY_TASK_ALWAYS_EAGER=false
 CELERY_TASK_EAGER_PROPAGATES=false
 ```
 
+You can bootstrap env quickly:
+
+```bash
+cp .env.example .env
+```
+
 Queue runtime (when using async email dispatch):
 
 ```bash
@@ -227,7 +233,12 @@ Production baseline:
   - file backend by default (`sent_emails/`)
   - optional console backend via `EMAIL_CONSOLE_BACKEND=true`
 - Verification dispatch is abstracted behind `core.emailing` provider interface.
+- User verification state is stored on `users.User.is_verified` (default `false` on registration).
 - Verification dispatch supports async queueing via `dispatch_verification_email()`:
   - if `EMAIL_ASYNC_ENABLED=true` and Celery task is available, dispatches to real Celery queue (`CELERY_TASK_DEFAULT_QUEUE`, default: `emails`)
   - queue publish failures are treated as failed dispatch (no silent fallback)
+- Verification callback endpoint:
+  - `GET /api/auth/verify-email?token=<signed_token>`
+  - `POST /api/auth/verify-email` with JSON body `{ "token": "..." }`
+  - On valid token: sets `is_verified=true`.
 - For production, switch provider by setting `EMAIL_PROVIDER_CLASS` to a custom class (e.g. SendGrid/SES) without changing registration flow code.

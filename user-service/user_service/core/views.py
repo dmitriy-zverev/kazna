@@ -1,10 +1,13 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.shortcuts import get_object_or_404
 from djoser.serializers import SetPasswordSerializer
 from rest_framework import exceptions, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from users.models import Group
 from users.serializers import (
     GroupSerializer,
@@ -167,3 +170,56 @@ class GroupViewSet(viewsets.ModelViewSet):
             raise exceptions.PermissionDenied("You cannot assign admins")
         instance = serializer.save()
         invalidate_group_cache(instance.user_id)
+
+
+class EmailVerificationView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def _get_token(self, request):
+        if request.method == "GET":
+            return request.query_params.get("token")
+        return request.data.get("token")
+
+    def _verify(self, request):
+        token = self._get_token(request)
+        if not token:
+            return Response(
+                {"detail": "Token is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        signer = TimestampSigner(salt="user-email-verification")
+        try:
+            user_id = signer.unsign(
+                token,
+                max_age=getattr(
+                    settings, "EMAIL_VERIFICATION_MAX_AGE_SECONDS", 60 * 60 * 24
+                ),
+            )
+        except (BadSignature, SignatureExpired):
+            return Response(
+                {"detail": "Invalid or expired verification token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "Invalid verification token user"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.is_verified:
+            user.is_verified = True
+            user.save(update_fields=["is_verified", "updated_at"])
+            invalidate_user_cache(user.id)
+
+        return Response(
+            {"detail": "Email verified successfully"}, status=status.HTTP_200_OK
+        )
+
+    def get(self, request):
+        return self._verify(request)
+
+    def post(self, request):
+        return self._verify(request)

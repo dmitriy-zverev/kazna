@@ -9,6 +9,7 @@ from drf_spectacular.views import (
 from rest_framework import routers
 
 from .views import (
+    EmailVerificationView,
     GroupViewSet,
     UserViewSet,
 )
@@ -19,6 +20,7 @@ router.register(r"groups", GroupViewSet, basename="groups")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("auth/verify-email", EmailVerificationView.as_view(), name="verify-email"),
     path("", include("djoser.urls")),
     path("auth/", include("djoser.urls.jwt")),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),

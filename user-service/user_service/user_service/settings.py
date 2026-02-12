@@ -205,6 +205,9 @@ DEFAULT_FROM_EMAIL = "no-reply@kazna.com"
 EMAIL_VERIFICATION_URL = os.getenv(
     "EMAIL_VERIFICATION_URL", "http://127.0.0.1:8000/api/auth/verify-email"
 )
+EMAIL_VERIFICATION_MAX_AGE_SECONDS = env_int(
+    "EMAIL_VERIFICATION_MAX_AGE_SECONDS", 60 * 60 * 24
+)
 EMAIL_PROVIDER_CLASS = os.getenv(
     "EMAIL_PROVIDER_CLASS", "core.emailing.DjangoEmailProvider"
 )
