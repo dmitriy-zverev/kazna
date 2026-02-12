@@ -125,6 +125,9 @@ Key environment variables:
 - `USE_HTTPS` (`true/false`)
 - `SECURE_HSTS_SECONDS`, `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD`
 - `X_FRAME_OPTIONS`, `SECURE_REFERRER_POLICY`
+- `EMAIL_CONSOLE_BACKEND` (`true/false`)
+- `EMAIL_VERIFICATION_URL` (base URL used in verification link)
+- `EMAIL_PROVIDER_CLASS` (pluggable provider class, default `core.emailing.DjangoEmailProvider`)
 
 Example local `.env`:
 
@@ -146,6 +149,10 @@ CSRF_TRUSTED_ORIGINS=http://localhost,http://127.0.0.1
 CORS_ALLOW_CREDENTIALS=true
 
 USE_HTTPS=false
+
+EMAIL_CONSOLE_BACKEND=false
+EMAIL_VERIFICATION_URL=http://127.0.0.1:8000/api/auth/verify-email
+EMAIL_PROVIDER_CLASS=core.emailing.DjangoEmailProvider
 ```
 
 Production baseline:
@@ -153,3 +160,11 @@ Production baseline:
 - set a strong `SECRET_KEY`
 - set `USE_HTTPS=true` behind reverse proxy/load balancer
 - set restrictive `ALLOWED_HOSTS`, CORS and CSRF origin lists
+
+## Email verification strategy
+
+- Current default is simple/local-friendly email delivery using Django backends:
+  - file backend by default (`sent_emails/`)
+  - optional console backend via `EMAIL_CONSOLE_BACKEND=true`
+- Verification dispatch is abstracted behind `core.emailing` provider interface.
+- For production, switch provider by setting `EMAIL_PROVIDER_CLASS` to a custom class (e.g. SendGrid/SES) without changing registration flow code.

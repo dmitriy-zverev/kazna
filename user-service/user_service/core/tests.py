@@ -19,6 +19,7 @@ from core.permissions import (
     IsSelfOrAdmin,
     IsSellerOrReadOnly,
 )
+from users.serializers import UserCreateSerializer
 
 User = get_user_model()
 
@@ -557,3 +558,48 @@ class CacheUtilsTests(TestCase):
         self.assertEqual(delete_pattern_mock.call_count, 4)
         delete_pattern_mock.assert_any_call("group:list:*")
         delete_pattern_mock.assert_any_call("group:detail:7:*")
+
+
+class EmailingTests(TestCase):
+    @patch("core.emailing.send_mail")
+    @patch(
+        "core.emailing.settings.EMAIL_VERIFICATION_URL",
+        "http://example.com/verify-email",
+    )
+    def test_django_email_provider_sends_verification_email(self, send_mail_mock):
+        user = User.objects.create_user(
+            email="verify@example.com",
+            username="verify_user",
+            password="StrongPass123!",
+            first_name="Verify",
+            last_name="User",
+        )
+
+        _ = UserCreateSerializer()
+        from core.emailing import DjangoEmailProvider
+
+        DjangoEmailProvider().send_verification_email(user)
+
+        self.assertTrue(send_mail_mock.called)
+        kwargs = send_mail_mock.call_args.kwargs
+        self.assertIn("Verify your email", kwargs["subject"])
+        self.assertIn("http://example.com/verify-email?token=", kwargs["message"])
+        self.assertEqual(kwargs["recipient_list"], [user.email])
+
+    @patch("users.serializers.send_verification_email")
+    def test_user_create_serializer_triggers_verification_email(self, send_mock):
+        serializer = UserCreateSerializer(
+            data={
+                "email": "newverify@example.com",
+                "username": "newverify",
+                "password": "StrongPass123!",
+                "first_name": "New",
+                "last_name": "Verify",
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        user = serializer.save()
+
+        self.assertTrue(User.objects.filter(pk=user.pk).exists())
+        send_mock.assert_called_once_with(user)

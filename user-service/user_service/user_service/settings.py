@@ -196,9 +196,18 @@ AUTH_USER_MODEL = "users.User"
 
 EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
 
+if env_bool("EMAIL_CONSOLE_BACKEND", False):
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 EMAIL_FILE_PATH = BASE_DIR / "sent_emails"
 
 DEFAULT_FROM_EMAIL = "no-reply@kazna.com"
+EMAIL_VERIFICATION_URL = os.getenv(
+    "EMAIL_VERIFICATION_URL", "http://127.0.0.1:8000/api/auth/verify-email"
+)
+EMAIL_PROVIDER_CLASS = os.getenv(
+    "EMAIL_PROVIDER_CLASS", "core.emailing.DjangoEmailProvider"
+)
 
 CORS_ALLOWED_ORIGINS = [
     *env_list(
