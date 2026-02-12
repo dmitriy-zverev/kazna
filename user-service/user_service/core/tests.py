@@ -606,6 +606,7 @@ class EmailingTests(TestCase):
 
     @patch("core.emailing.send_verification_email")
     @patch("core.emailing.send_verification_email_task")
+    @patch("core.emailing.settings.CELERY_TASK_DEFAULT_QUEUE", "emails")
     @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", True)
     def test_dispatch_verification_email_uses_async_task_when_enabled(
         self, task_mock, sync_send_mock
@@ -623,7 +624,7 @@ class EmailingTests(TestCase):
         result = dispatch_verification_email(user)
 
         self.assertTrue(result)
-        task_mock.delay.assert_called_once_with(user.id)
+        task_mock.apply_async.assert_called_once_with(args=[user.id], queue="emails")
         sync_send_mock.assert_not_called()
 
     @patch("core.emailing.send_verification_email", return_value=True)
@@ -646,16 +647,16 @@ class EmailingTests(TestCase):
         self.assertTrue(result)
         sync_send_mock.assert_called_once_with(user)
 
-    @patch("core.emailing.logger.warning")
+    @patch("core.emailing.logger.exception")
     @patch("core.emailing.send_verification_email", return_value=True)
     @patch("core.emailing.settings.EMAIL_ASYNC_ENABLED", True)
     def test_dispatch_verification_email_falls_back_when_async_delay_fails(
-        self, sync_send_mock, warning_mock
+        self, sync_send_mock, exception_mock
     ):
         from core.emailing import dispatch_verification_email
 
         class FailingTask:
-            def delay(self, *_args, **_kwargs):
+            def apply_async(self, *_args, **_kwargs):
                 raise RuntimeError("broker is down")
 
         user = User.objects.create_user(
@@ -669,9 +670,9 @@ class EmailingTests(TestCase):
         with patch("core.emailing.send_verification_email_task", FailingTask()):
             result = dispatch_verification_email(user)
 
-        self.assertTrue(result)
-        sync_send_mock.assert_called_once_with(user)
-        warning_mock.assert_called_once()
+        self.assertFalse(result)
+        sync_send_mock.assert_not_called()
+        exception_mock.assert_called_once()
 
 
 class AsyncTaskTests(TestCase):

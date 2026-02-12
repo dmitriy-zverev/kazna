@@ -142,6 +142,8 @@ Key environment variables:
 - `EMAIL_PROVIDER_CLASS` (pluggable provider class, default `core.emailing.DjangoEmailProvider`)
 - `EMAIL_ASYNC_ENABLED` (`true/false`)
 - `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
+- `CELERY_TASK_DEFAULT_QUEUE` (default `emails`)
+- `CELERY_TASK_ALWAYS_EAGER`, `CELERY_TASK_EAGER_PROPAGATES`
 
 Example local `.env`:
 
@@ -170,11 +172,18 @@ EMAIL_PROVIDER_CLASS=core.emailing.DjangoEmailProvider
 EMAIL_ASYNC_ENABLED=false
 CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//
 CELERY_RESULT_BACKEND=rpc://
+CELERY_TASK_DEFAULT_QUEUE=emails
+CELERY_TASK_ALWAYS_EAGER=false
+CELERY_TASK_EAGER_PROPAGATES=false
 ```
 
 Queue runtime (when using async email dispatch):
 
 ```bash
+# from repository root (starts RabbitMQ)
+docker compose up -d rabbitmq
+
+# from user-service directory
 make celery-worker
 make celery-beat
 ```
@@ -185,11 +194,19 @@ End-to-end async smoke (requires worker + broker running):
 EMAIL_ASYNC_ENABLED=true make smoke-async-email
 ```
 
+One-command local e2e smoke (starts RabbitMQ, launches worker, runs smoke, then stops worker):
+
+```bash
+make smoke-async-e2e
+```
+
+The command waits for RabbitMQ health and Celery worker readiness before dispatching the smoke task.
+
 Recommended local flow (3 terminals):
 
 ```bash
 # terminal 1
-uv run celery -A user_service worker --loglevel=info
+make celery-worker
 
 # terminal 2
 uv run python user_service/manage.py runserver
@@ -211,6 +228,6 @@ Production baseline:
   - optional console backend via `EMAIL_CONSOLE_BACKEND=true`
 - Verification dispatch is abstracted behind `core.emailing` provider interface.
 - Verification dispatch supports async queueing via `dispatch_verification_email()`:
-  - if `EMAIL_ASYNC_ENABLED=true` and Celery task is available, dispatches via task queue
-  - otherwise safely falls back to sync send path
+  - if `EMAIL_ASYNC_ENABLED=true` and Celery task is available, dispatches to real Celery queue (`CELERY_TASK_DEFAULT_QUEUE`, default: `emails`)
+  - queue publish failures are treated as failed dispatch (no silent fallback)
 - For production, switch provider by setting `EMAIL_PROVIDER_CLASS` to a custom class (e.g. SendGrid/SES) without changing registration flow code.

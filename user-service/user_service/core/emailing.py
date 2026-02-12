@@ -60,11 +60,15 @@ def send_verification_email(user):
 def dispatch_verification_email(user):
     if getattr(settings, "EMAIL_ASYNC_ENABLED", False) and send_verification_email_task:
         try:
-            send_verification_email_task.delay(user.id)
+            send_verification_email_task.apply_async(
+                args=[user.id],
+                queue=getattr(settings, "CELERY_TASK_DEFAULT_QUEUE", "emails"),
+            )
             return True
         except Exception:
-            logger.warning(
-                "Async email dispatch failed, fallback to sync",
+            logger.exception(
+                "Async email dispatch failed",
                 extra={"user_id": user.id},
             )
+            return False
     return send_verification_email(user)

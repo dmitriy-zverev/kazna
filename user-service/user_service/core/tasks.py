@@ -9,7 +9,13 @@ except Exception:  # pragma: no cover
         return _decorator
 
 
-@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=3,
+    ignore_result=True,
+)
 def send_verification_email_task(self, user_id):
     from django.contrib.auth import get_user_model
 
