@@ -58,6 +58,8 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "create":
             return [permissions.AllowAny()]
+        if self.action == "list":
+            return [permissions.IsAuthenticated(), IsAdminOrModerator()]
         if self.action in ("retrieve", "update", "partial_update", "destroy"):
             return [permissions.IsAuthenticated(), IsSelfOrAdmin()]
         return [permission() for permission in self.permission_classes]

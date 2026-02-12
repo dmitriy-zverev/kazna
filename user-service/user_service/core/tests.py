@@ -36,6 +36,22 @@ class UserViewSetTests(APITestCase):
             last_name="User",
             is_staff=True,
         )
+        self.moderator = User.objects.create_user(
+            email="moderator@example.com",
+            username="moderator_user",
+            password=self.password,
+            first_name="Moderator",
+            last_name="User",
+        )
+        Group.objects.create(user=self.moderator, user_type="moderator")
+        self.buyer = User.objects.create_user(
+            email="buyer@example.com",
+            username="buyer_user",
+            password=self.password,
+            first_name="Buyer",
+            last_name="User",
+        )
+        Group.objects.create(user=self.buyer, user_type="buyer")
 
     def test_user_create_is_public(self):
         url = reverse("users-list")
@@ -64,6 +80,22 @@ class UserViewSetTests(APITestCase):
         self.assertEqual(forbidden_response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(allowed_response.status_code, status.HTTP_200_OK)
         self.assertEqual(allowed_response.data["id"], self.other_user.id)
+
+    def test_users_list_requires_admin_or_moderator(self):
+        url = reverse("users-list")
+
+        self.client.force_authenticate(user=self.buyer)
+        buyer_response = self.client.get(url)
+
+        self.client.force_authenticate(user=self.moderator)
+        moderator_response = self.client.get(url)
+
+        self.client.force_authenticate(user=self.admin)
+        admin_response = self.client.get(url)
+
+        self.assertEqual(buyer_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(moderator_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
 
     @patch("core.views.cache.delete_pattern")
     def test_user_update_clears_cache(self, delete_pattern_mock):
@@ -103,6 +135,14 @@ class GroupViewSetTests(APITestCase):
             first_name="Target",
             last_name="User",
         )
+        self.buyer = User.objects.create_user(
+            email="buyer-group@example.com",
+            username="buyer_group_user",
+            password=self.password,
+            first_name="Buyer",
+            last_name="Group",
+        )
+        Group.objects.create(user=self.buyer, user_type="buyer")
 
     def test_groups_requires_authenticated_admin_or_moderator(self):
         url = reverse("groups-list")
@@ -112,8 +152,12 @@ class GroupViewSetTests(APITestCase):
         self.client.force_authenticate(user=self.admin)
         admin_response = self.client.get(url)
 
+        self.client.force_authenticate(user=self.buyer)
+        buyer_response = self.client.get(url)
+
         self.assertEqual(anonymous_response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(buyer_response.status_code, status.HTTP_403_FORBIDDEN)
 
     @patch("core.views.cache.delete_pattern")
     def test_group_create_clears_cache(self, delete_pattern_mock):
@@ -131,6 +175,21 @@ class GroupViewSetTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertGreaterEqual(delete_pattern_mock.call_count, 1)
+
+    def test_moderator_cannot_create_group(self):
+        url = reverse("groups-list")
+        self.client.force_authenticate(user=self.moderator)
+
+        response = self.client.post(
+            url,
+            {
+                "user_type": "seller",
+                "user": self.target_user.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class AuthAndSignalsTests(APITestCase):
