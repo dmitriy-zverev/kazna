@@ -3,6 +3,8 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from users.models import Group, User
 
+from .cache_utils import invalidate_group_cache, invalidate_user_cache
+
 
 @receiver(post_save, sender=User)
 @receiver(post_delete, sender=User)
@@ -13,22 +15,6 @@ def invalidate_user_and_group_cache(sender, instance, **kwargs):
         return
 
     if sender is User:
-        user_id = instance.id
-        patterns = [
-            "user:list:*",
-            f"user:detail:{user_id}:*",
-            f"user:me:{user_id}:*",
-            f"group:detail:{user_id}:*",
-            "group:list:*",
-        ]
+        invalidate_user_cache(instance.id)
     else:
-        user_id = instance.user_id
-        patterns = [
-            "group:list:*",
-            f"group:detail:{user_id}:*",
-            f"user:detail:{user_id}:*",
-            f"user:me:{user_id}:*",
-        ]
-
-    for pattern in patterns:
-        cache.delete_pattern(pattern)
+        invalidate_group_cache(instance.user_id)
