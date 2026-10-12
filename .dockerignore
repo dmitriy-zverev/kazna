@@ -1,0 +1,28 @@
+.git
+.gitignore
+.github
+
+# Local tooling and editor files
+.idea
+.vscode
+*.swp
+
+# Deployment assets are not needed inside the build context
+deploy
+docs
+api
+sdk
+dashboard
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Documentation (go.mod/go.sum must stay for the dependency layer)
+*.md
+
+# Build artifacts
+bin
+tmp
+coverage.out

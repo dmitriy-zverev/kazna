@@ -1,0 +1,30 @@
+# Caddy reverse proxy for the payment service.
+#
+# Set PUBLIC_HOST to the public DNS name. Caddy provisions and renews TLS
+# automatically. For local testing use "localhost" and Caddy serves HTTPS with
+# a local CA.
+#
+#   PUBLIC_HOST=payments.example.com docker compose --profile proxy up -d
+
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$PUBLIC_HOST:localhost} {
+	encode zstd gzip
+
+	# Security headers for the API surface.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Health endpoints are internal; do not expose them publicly.
+	@health path /health/*
+	respond @health 404
+
+	reverse_proxy api:8080
+}

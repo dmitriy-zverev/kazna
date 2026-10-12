@@ -1,0 +1,506 @@
+openapi: 3.1.0
+
+info:
+  title: Kazna Payment Service API
+  version: 0.1.0
+  description: |
+    Universal payment service. Client applications integrate once with this API
+    and never talk to YooKassa directly.
+
+    All amounts are integers in minor currency units (kopecks for RUB).
+    Every money-moving request requires an `Idempotency-Key` header.
+
+    This document is the single contract shared by the backend, the SDKs and the
+    tests. See docs/PAYMENT_LIFECYCLE.md for state transitions and
+    docs/RELIABILITY.md for retry/idempotency rules.
+  contact:
+    name: Kazna
+    url: https://github.com/dmitriy-zverev/kazna
+
+servers:
+  - url: https://payments.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Payments
+  - name: Orders
+  - name: Refunds
+  - name: Health
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      operationId: healthLive
+      responses:
+        "200":
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      security: []
+      operationId: healthReady
+      responses:
+        "200":
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: A dependency is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /v1/payments:
+    post:
+      tags: [Payments]
+      summary: Create a payment
+      description: |
+        Creates a payment attempt for an order and returns a checkout URL.
+
+        Idempotent on `Idempotency-Key`. Repeating the request with the same key
+        and identical body returns the existing payment. Repeating it with the
+        same key but a different body returns `409 IDEMPOTENCY_CONFLICT`.
+
+        While the provider call is in flight the response is `202 Accepted` with
+        `status: creating` and a `retry_after` hint. A network timeout must never
+        cause a new payment with a fresh idempotency key.
+      operationId: createPayment
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "202":
+          description: Provider call still in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentPending"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/ProviderUnavailable"
+    get:
+      tags: [Payments]
+      summary: List payments
+      description: |
+        Lists payments for the authenticated application. Filter by `order_id`
+        to recover a payment after an application restart.
+      operationId: listPayments
+      parameters:
+        - name: order_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PaymentStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Page of payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Payment"
+                  next_cursor:
+                    type: [string, "null"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/payments/{payment_id}:
+    get:
+      tags: [Payments]
+      summary: Get a payment
+      operationId: getPayment
+      parameters:
+        - $ref: "#/components/parameters/PaymentID"
+      responses:
+        "200":
+          description: Payment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/orders/{order_id}/payment-attempts:
+    post:
+      tags: [Orders]
+      summary: Create a new payment attempt for an order
+      description: |
+        Creates a new attempt only after the previous attempt reached a terminal
+        state. Returns `409 PAYMENT_ALREADY_SUCCEEDED` if the order is already
+        paid, and `409 IDEMPOTENCY_CONFLICT` if an active attempt still exists.
+      operationId: createPaymentAttempt
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePaymentRequest"
+      responses:
+        "201":
+          description: New payment attempt created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "202":
+          description: Provider call still in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentPending"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/payments/{payment_id}/refunds:
+    post:
+      tags: [Refunds]
+      summary: Refund a payment
+      description: |
+        Full or partial refund. A refund is an independent financial operation
+        and does not change the original payment status (`succeeded` stays
+        `succeeded`). Partial refunds depend on the payment method.
+      operationId: createRefund
+      parameters:
+        - $ref: "#/components/parameters/PaymentID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequest"
+      responses:
+        "201":
+          description: Refund created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: app_live_xxxxx
+      description: |
+        Application API key. Server-side only; never embed it in browser code.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-supplied key, unique per logical operation, max 64 characters.
+        Retries of the same operation must reuse the same key.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+    PaymentID:
+      name: payment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^pay_[A-Za-z0-9]+$"
+        example: pay_abc123
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Idempotency conflict or invalid state transition
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unprocessable:
+      description: Semantically invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ProviderUnavailable:
+      description: Payment provider temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        reason:
+          type: string
+          description: Present when status is `unavailable`.
+
+    PaymentStatus:
+      type: string
+      description: Internal payment state machine. See docs/PAYMENT_LIFECYCLE.md.
+      enum:
+        - created
+        - creating
+        - creation_unknown
+        - pending
+        - succeeded
+        - canceled
+
+    CreatePaymentRequest:
+      type: object
+      required: [order_id, amount, currency]
+      properties:
+        order_id:
+          type: string
+          maxLength: 128
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount in minor units (kopecks).
+          example: 49900
+        currency:
+          type: string
+          enum: [RUB]
+        description:
+          type: string
+          maxLength: 128
+        return_url:
+          type: string
+          format: uri
+          description: Must match an allowed domain of the application.
+        customer:
+          $ref: "#/components/schemas/Customer"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          maxProperties: 20
+
+    Customer:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+
+    Payment:
+      type: object
+      required: [id, order_id, attempt_number, status, amount, currency, provider, created_at]
+      properties:
+        id:
+          type: string
+          example: pay_abc123
+        order_id:
+          type: string
+        attempt_number:
+          type: integer
+          minimum: 1
+        status:
+          $ref: "#/components/schemas/PaymentStatus"
+        amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          enum: [RUB]
+        provider:
+          type: string
+          enum: [yookassa]
+        checkout_url:
+          type: [string, "null"]
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        paid_at:
+          type: [string, "null"]
+          format: date-time
+
+    PaymentPending:
+      type: object
+      required: [id, status, retry_after]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [creating, creation_unknown]
+        checkout_url:
+          type: [string, "null"]
+        retry_after:
+          type: integer
+          description: Suggested delay in seconds before polling again.
+
+    CreateRefundRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 128
+
+    Refund:
+      type: object
+      required: [id, payment_id, status, amount, currency, created_at]
+      properties:
+        id:
+          type: string
+        payment_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, succeeded, canceled]
+        amount:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          enum: [RUB]
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, retryable]
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+              description: Human-readable, safe to log; never contains secrets.
+            retryable:
+              type: boolean
+            request_id:
+              type: string
+
+    ErrorCode:
+      type: string
+      enum:
+        - INVALID_REQUEST
+        - UNAUTHORIZED
+        - PAYMENT_NOT_FOUND
+        - IDEMPOTENCY_CONFLICT
+        - PAYMENT_ALREADY_SUCCEEDED
+        - PROVIDER_UNAVAILABLE
+        - PROVIDER_TIMEOUT
+        - PROVIDER_AUTH_FAILED
+        - PAYMENT_STATE_UNKNOWN
+        - INTERNAL_ERROR
