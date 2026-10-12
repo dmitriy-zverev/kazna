@@ -13,7 +13,6 @@ var (
 	ErrUnauthorized = errors.New("applications: unauthorized")
 	ErrConflict     = errors.New("applications: conflict")
 	ErrValidation   = errors.New("applications: validation failed")
-	ErrNoProvider   = errors.New("applications: no active provider account")
 )
 
 // Application is a client application registered with the payment service.
@@ -91,6 +90,13 @@ const ProviderYooKassa = "yookassa"
 type Authenticated struct {
 	Application Application
 	KeyID       uuid.UUID
+}
+
+// Provisioned is what an application needs to start integrating. Both values
+// are shown exactly once, at creation.
+type Provisioned struct {
+	APIKey        IssuedKey
+	WebhookSecret string
 }
 
 // CreateApplicationInput is the payload for creating an application.

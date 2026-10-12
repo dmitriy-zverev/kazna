@@ -3,9 +3,12 @@ package applications
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -25,25 +28,59 @@ const maxSlugLen = 64
 
 var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
 
+// Options tune environment-dependent behaviour.
+type Options struct {
+	// Production enables strict outbound URL validation (https only, no
+	// internal hosts) per docs/SECURITY.md §4.
+	Production bool
+}
+
 // Service owns application, API key and provider-connection business logic.
 // HTTP handlers must call this instead of touching the database directly.
 type Service struct {
 	pool   *pgxpool.Pool
 	q      *sqlcgen.Queries
 	cipher *security.Cipher
+	urls   security.OutboundURLOptions
 }
 
-// NewService wires the service to a pool and the secret cipher.
-func NewService(pool *pgxpool.Pool, cipher *security.Cipher) *Service {
-	return &Service{pool: pool, q: sqlcgen.New(pool), cipher: cipher}
+// NewService wires the service to a pool, the secret cipher and its options.
+func NewService(pool *pgxpool.Pool, cipher *security.Cipher, opts Options) *Service {
+	return &Service{
+		pool:   pool,
+		q:      sqlcgen.New(pool),
+		cipher: cipher,
+		urls: security.OutboundURLOptions{
+			AllowHTTP:    !opts.Production,
+			AllowPrivate: !opts.Production,
+		},
+	}
 }
 
-// CreateApplication registers an application and issues its first API key in
-// one transaction, so an application never exists without a usable key.
-func (s *Service) CreateApplication(ctx context.Context, in CreateApplicationInput) (Application, IssuedKey, error) {
+// CreateApplication registers an application and issues its first API key and
+// webhook signing secret in one transaction, so an application never exists
+// without usable credentials.
+func (s *Service) CreateApplication(ctx context.Context, in CreateApplicationInput) (Application, Provisioned, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || len(name) > 255 {
-		return Application{}, IssuedKey{}, fmt.Errorf("%w: name is required and must be at most 255 characters", ErrValidation)
+		return Application{}, Provisioned{}, fmt.Errorf("%w: name is required and must be at most 255 characters", ErrValidation)
+	}
+	in.DefaultReturnURL = normalizeOptional(in.DefaultReturnURL)
+	in.WebhookURL = normalizeOptional(in.WebhookURL)
+	if err := s.validateURL("default_return_url", in.DefaultReturnURL); err != nil {
+		return Application{}, Provisioned{}, err
+	}
+	if err := s.validateURL("webhook_url", in.WebhookURL); err != nil {
+		return Application{}, Provisioned{}, err
+	}
+
+	webhookSecret, err := generateWebhookSecret()
+	if err != nil {
+		return Application{}, Provisioned{}, err
+	}
+	encryptedSecret, err := s.cipher.Encrypt([]byte(webhookSecret))
+	if err != nil {
+		return Application{}, Provisioned{}, err
 	}
 
 	base := slugify(name)
@@ -54,26 +91,32 @@ func (s *Service) CreateApplication(ctx context.Context, in CreateApplicationInp
 		if attempt > 0 {
 			suffix, err := randomHex(3)
 			if err != nil {
-				return Application{}, IssuedKey{}, err
+				return Application{}, Provisioned{}, err
 			}
 			slug = truncate(base, maxSlugLen-len(suffix)-1) + "-" + suffix
 		}
 
-		app, key, err := s.createApplicationTx(ctx, slug, name, in)
+		app, key, err := s.createApplicationTx(ctx, slug, name, in, encryptedSecret)
 		switch {
 		case err == nil:
-			return app, key, nil
+			return app, Provisioned{APIKey: key, WebhookSecret: webhookSecret}, nil
 		case isUniqueViolation(err):
 			lastErr = err
 			continue
 		default:
-			return Application{}, IssuedKey{}, err
+			return Application{}, Provisioned{}, err
 		}
 	}
-	return Application{}, IssuedKey{}, fmt.Errorf("%w: could not allocate a unique slug (%v)", ErrConflict, lastErr)
+
+	// The cause is logged, never returned: it contains database identifiers.
+	slog.ErrorContext(ctx, "applications: could not allocate a unique slug",
+		slog.String("name", name),
+		slog.Any("error", lastErr),
+	)
+	return Application{}, Provisioned{}, fmt.Errorf("%w: could not allocate a unique slug", ErrConflict)
 }
 
-func (s *Service) createApplicationTx(ctx context.Context, slug, name string, in CreateApplicationInput) (Application, IssuedKey, error) {
+func (s *Service) createApplicationTx(ctx context.Context, slug, name string, in CreateApplicationInput, encryptedSecret []byte) (Application, IssuedKey, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Application{}, IssuedKey{}, fmt.Errorf("applications: begin: %w", err)
@@ -83,10 +126,11 @@ func (s *Service) createApplicationTx(ctx context.Context, slug, name string, in
 	q := s.q.WithTx(tx)
 
 	row, err := q.CreateApplication(ctx, sqlcgen.CreateApplicationParams{
-		Name:             name,
-		Slug:             slug,
-		DefaultReturnUrl: in.DefaultReturnURL,
-		WebhookUrl:       in.WebhookURL,
+		Name:                   name,
+		Slug:                   slug,
+		DefaultReturnUrl:       in.DefaultReturnURL,
+		WebhookUrl:             in.WebhookURL,
+		WebhookSecretEncrypted: encryptedSecret,
 	})
 	if err != nil {
 		return Application{}, IssuedKey{}, err
@@ -285,7 +329,11 @@ func (s *Service) AttachProviderAccount(ctx context.Context, appID uuid.UUID, in
 	})
 	switch {
 	case err == nil:
-		// Reuse the existing account; never overwrite its secret implicitly.
+		// The shop is already connected. Storing a different secret here would
+		// be silently ignored, so refuse instead of leaving the caller misled.
+		if err := s.assertSameSecret(row, in.SecretKey); err != nil {
+			return ProviderAccount{}, err
+		}
 	case errors.Is(err, pgx.ErrNoRows):
 		encrypted, encErr := s.cipher.Encrypt([]byte(in.SecretKey))
 		if encErr != nil {
@@ -304,8 +352,20 @@ func (s *Service) AttachProviderAccount(ctx context.Context, appID uuid.UUID, in
 		return ProviderAccount{}, err
 	}
 
-	// The first provider of an application is always the default.
-	makeDefault := in.IsDefault || len(existing) == 0
+	// Choose the default flag so the application is never left without one:
+	//   explicitly requested -> true
+	//   already attached     -> keep its current flag
+	//   first provider       -> true
+	//   otherwise            -> false
+	currentlyDefault := false
+	for _, item := range existing {
+		if item.ID == row.ID {
+			currentlyDefault = item.IsDefault
+			break
+		}
+	}
+
+	makeDefault := in.IsDefault || currentlyDefault || len(existing) == 0
 	if makeDefault {
 		if err := q.ClearDefaultProviderForApplication(ctx, database.ToUUID(appID)); err != nil {
 			return ProviderAccount{}, err
@@ -360,6 +420,75 @@ func (s *Service) SetProviderStatus(ctx context.Context, accountID uuid.UUID, st
 	})
 }
 
+// RotateWebhookSecret issues a new HMAC signing secret and returns it once.
+func (s *Service) RotateWebhookSecret(ctx context.Context, appID uuid.UUID) (string, error) {
+	if _, err := s.q.GetApplication(ctx, database.ToUUID(appID)); err != nil {
+		return "", mapNotFound(err)
+	}
+
+	secret, err := generateWebhookSecret()
+	if err != nil {
+		return "", err
+	}
+	encrypted, err := s.cipher.Encrypt([]byte(secret))
+	if err != nil {
+		return "", err
+	}
+	if err := s.q.UpdateApplicationWebhookSecret(ctx, sqlcgen.UpdateApplicationWebhookSecretParams{
+		ID:                     database.ToUUID(appID),
+		WebhookSecretEncrypted: encrypted,
+	}); err != nil {
+		return "", err
+	}
+	return secret, nil
+}
+
+// assertSameSecret refuses to reuse a provider account with a different secret,
+// because the stored secret would otherwise be silently ignored.
+func (s *Service) assertSameSecret(row sqlcgen.ProviderAccount, presented string) error {
+	stored, err := s.cipher.Decrypt(row.EncryptedSecretKey)
+	if err != nil {
+		return fmt.Errorf("applications: cannot read the stored provider secret: %w", err)
+	}
+	if subtle.ConstantTimeCompare(stored, []byte(presented)) != 1 {
+		return fmt.Errorf("%w: shop %s is already connected with a different secret", ErrConflict, row.ShopID)
+	}
+	return nil
+}
+
+// validateURL applies the environment's outbound URL policy to an optional field.
+func (s *Service) validateURL(field string, raw *string) error {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil
+	}
+	if err := security.ValidateOutboundURL(*raw, s.urls); err != nil {
+		reason := strings.TrimPrefix(err.Error(), security.ErrInvalidURL.Error()+": ")
+		return fmt.Errorf("%w: %s: %s", ErrValidation, field, reason)
+	}
+	return nil
+}
+
+func generateWebhookSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("applications: webhook secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// normalizeOptional turns an empty or whitespace-only optional string into nil,
+// so "not provided" and "provided empty" are stored identically.
+func normalizeOptional(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*s)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
 func validateProviderInput(in AttachProviderInput) error {
 	if in.Provider != ProviderYooKassa {
 		return fmt.Errorf("%w: unsupported provider %q", ErrValidation, in.Provider)
@@ -367,8 +496,8 @@ func validateProviderInput(in AttachProviderInput) error {
 	if in.ShopID == "" || len(in.ShopID) > 64 {
 		return fmt.Errorf("%w: shop_id is required and must be at most 64 characters", ErrValidation)
 	}
-	if in.SecretKey == "" {
-		return fmt.Errorf("%w: secret_key is required", ErrValidation)
+	if in.SecretKey == "" || len(in.SecretKey) > 512 {
+		return fmt.Errorf("%w: secret_key is required and must be at most 512 characters", ErrValidation)
 	}
 	if in.Environment != EnvironmentTest && in.Environment != EnvironmentProduction {
 		return fmt.Errorf("%w: environment must be %q or %q", ErrValidation, EnvironmentTest, EnvironmentProduction)

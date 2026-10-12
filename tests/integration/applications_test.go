@@ -38,6 +38,7 @@ import (
 const (
 	adminToken   = "test-admin-token"
 	providerBase = "http://127.0.0.1:1" // unreachable on purpose
+	masterKey    = "abababababababababababababababababababababababababababababababab"
 )
 
 type harness struct {
@@ -45,7 +46,17 @@ type harness struct {
 	pool   *pgxpool.Pool
 }
 
-func newHarness(t *testing.T) *harness {
+type provisioned struct {
+	id            string
+	apiKey        string
+	webhookSecret string
+}
+
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
+
+func newProductionHarness(t *testing.T) *harness { return newHarnessWith(t, true) }
+
+func newHarnessWith(t *testing.T, production bool) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -78,13 +89,18 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(pool.Close)
 
-	cipher, err := security.NewCipher(strings.Repeat("ab", 32), "")
+	cipher, err := security.NewCipher(masterKey, "")
 	if err != nil {
 		t.Fatalf("cipher: %v", err)
 	}
 
+	appEnv := "test"
+	if production {
+		appEnv = "production"
+	}
+
 	cfg := &config.Config{
-		AppEnv:          "test",
+		AppEnv:          appEnv,
 		AdminToken:      adminToken,
 		YooKassaAPIURL:  providerBase,
 		LogLevel:        "error",
@@ -95,7 +111,7 @@ func newHarness(t *testing.T) *harness {
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config:       cfg,
 		Health:       database.NewChecker(pool),
-		Applications: applications.NewService(pool, cipher),
+		Applications: applications.NewService(pool, cipher, applications.Options{Production: production}),
 	})
 
 	server := httptest.NewServer(router)
@@ -141,51 +157,65 @@ func (h *harness) request(t *testing.T, method, path, token string, body any) (*
 	return resp, decoded
 }
 
-// createApplication provisions an application through the admin API and returns
-// its id and the one-time API key.
-func (h *harness) createApplication(t *testing.T, name string) (id, apiKey string) {
+// createApplication provisions an application through the admin API.
+func (h *harness) createApplication(t *testing.T, name string) provisioned {
+	t.Helper()
+	return h.createApplicationWith(t, map[string]any{"name": name})
+}
+
+func (h *harness) createApplicationWith(t *testing.T, payload map[string]any) provisioned {
 	t.Helper()
 
-	resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken,
-		map[string]any{"name": name})
+	resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken, payload)
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create application %q: status %d, body %v", name, resp.StatusCode, body)
+		t.Fatalf("create application: status %d, body %v", resp.StatusCode, body)
 	}
 
 	app, _ := body["application"].(map[string]any)
 	key, _ := body["api_key"].(map[string]any)
 
-	id, _ = app["id"].(string)
-	apiKey, _ = key["api_key"].(string)
-	if id == "" || apiKey == "" {
-		t.Fatalf("create application %q: missing id or api_key in %v", name, body)
+	result := provisioned{
+		id:            stringField(app, "id"),
+		apiKey:        stringField(key, "api_key"),
+		webhookSecret: stringField(body, "webhook_secret"),
 	}
-	return id, apiKey
+	if result.id == "" || result.apiKey == "" || result.webhookSecret == "" {
+		t.Fatalf("create application: incomplete response %v", body)
+	}
+	return result
+}
+
+func stringField(m map[string]any, key string) string {
+	value, _ := m[key].(string)
+	return value
 }
 
 func TestTwoApplicationsAreIsolated(t *testing.T) {
 	h := newHarness(t)
 
-	idA, keyA := h.createApplication(t, "SaaS A")
-	idB, keyB := h.createApplication(t, "SaaS B")
+	appA := h.createApplication(t, "SaaS A")
+	appB := h.createApplication(t, "SaaS B")
 
-	if idA == idB {
+	if appA.id == appB.id {
 		t.Fatal("two applications received the same id")
 	}
-	if keyA == keyB {
+	if appA.apiKey == appB.apiKey {
 		t.Fatal("two applications received the same API key")
+	}
+	if appA.webhookSecret == appB.webhookSecret {
+		t.Fatal("two applications received the same webhook secret")
 	}
 
 	// Each key resolves to its own application and to nothing else.
 	for _, tc := range []struct{ name, key, wantID string }{
-		{"A", keyA, idA},
-		{"B", keyB, idB},
+		{"A", appA.apiKey, appA.id},
+		{"B", appB.apiKey, appB.id},
 	} {
 		resp, body := h.request(t, http.MethodGet, "/v1/me", tc.key, nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("me with key %s: status %d, body %v", tc.name, resp.StatusCode, body)
 		}
-		if got, _ := body["application_id"].(string); got != tc.wantID {
+		if got := stringField(body, "application_id"); got != tc.wantID {
 			t.Fatalf("key %s resolved to %q, want %q", tc.name, got, tc.wantID)
 		}
 	}
@@ -193,9 +223,9 @@ func TestTwoApplicationsAreIsolated(t *testing.T) {
 
 func TestAPIKeyCannotReachAdminAPI(t *testing.T) {
 	h := newHarness(t)
-	_, key := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
-	resp, _ := h.request(t, http.MethodGet, "/admin/applications", key, nil)
+	resp, _ := h.request(t, http.MethodGet, "/admin/applications", app.apiKey, nil)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("application key reached the admin API: status %d, want 401", resp.StatusCode)
 	}
@@ -203,10 +233,10 @@ func TestAPIKeyCannotReachAdminAPI(t *testing.T) {
 
 func TestUnknownAndTamperedKeysAreRejected(t *testing.T) {
 	h := newHarness(t)
-	_, key := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
-	tampered := key[:len(key)-1] + "X"
-	if tampered == key {
+	tampered := app.apiKey[:len(app.apiKey)-1] + "X"
+	if tampered == app.apiKey {
 		t.Fatal("test setup produced an unchanged key")
 	}
 
@@ -220,9 +250,9 @@ func TestUnknownAndTamperedKeysAreRejected(t *testing.T) {
 
 func TestRevokedKeyStopsWorking(t *testing.T) {
 	h := newHarness(t)
-	appID, key := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
-	resp, body := h.request(t, http.MethodGet, "/admin/applications/"+appID+"/keys", adminToken, nil)
+	resp, body := h.request(t, http.MethodGet, "/admin/applications/"+app.id+"/keys", adminToken, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list keys: status %d, body %v", resp.StatusCode, body)
 	}
@@ -231,14 +261,14 @@ func TestRevokedKeyStopsWorking(t *testing.T) {
 		t.Fatalf("expected exactly one key, got %d", len(data))
 	}
 	first, _ := data[0].(map[string]any)
-	keyID, _ := first["id"].(string)
+	keyID := stringField(first, "id")
 
-	resp, _ = h.request(t, http.MethodDelete, "/admin/applications/"+appID+"/keys/"+keyID, adminToken, nil)
+	resp, _ = h.request(t, http.MethodDelete, "/admin/applications/"+app.id+"/keys/"+keyID, adminToken, nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("revoke: status %d, want 204", resp.StatusCode)
 	}
 
-	resp, _ = h.request(t, http.MethodGet, "/v1/me", key, nil)
+	resp, _ = h.request(t, http.MethodGet, "/v1/me", app.apiKey, nil)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("revoked key still works: status %d, want 401", resp.StatusCode)
 	}
@@ -246,11 +276,11 @@ func TestRevokedKeyStopsWorking(t *testing.T) {
 
 func TestProviderSecretIsStoredEncrypted(t *testing.T) {
 	h := newHarness(t)
-	appID, _ := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
 	const plaintext = "live_secret_key_do_not_leak"
 
-	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, map[string]any{
+	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
 		"provider":    "yookassa",
 		"shop_id":     "123456",
 		"secret_key":  plaintext,
@@ -274,7 +304,7 @@ func TestProviderSecretIsStoredEncrypted(t *testing.T) {
 		t.Fatal("plaintext secret is present in the database column")
 	}
 
-	cipher, _ := security.NewCipher(strings.Repeat("ab", 32), "")
+	cipher, _ := security.NewCipher(masterKey, "")
 	decrypted, err := cipher.Decrypt(stored)
 	if err != nil {
 		t.Fatalf("stored secret does not decrypt: %v", err)
@@ -286,9 +316,9 @@ func TestProviderSecretIsStoredEncrypted(t *testing.T) {
 
 func TestProviderConnectionStatusIsRecorded(t *testing.T) {
 	h := newHarness(t)
-	appID, _ := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
-	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, map[string]any{
+	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
 		"provider":    "yookassa",
 		"shop_id":     "777",
 		"secret_key":  "secret",
@@ -297,7 +327,7 @@ func TestProviderConnectionStatusIsRecorded(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("attach provider: status %d, body %v", resp.StatusCode, body)
 	}
-	providerID, _ := body["id"].(string)
+	providerID := stringField(body, "id")
 
 	// The configured provider URL is unreachable, so the check must fail
 	// gracefully and mark the connection as needing attention.
@@ -305,10 +335,10 @@ func TestProviderConnectionStatusIsRecorded(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("test connection: status %d, body %v", resp.StatusCode, body)
 	}
-	if status, _ := body["status"].(string); status != "failed" {
+	if status := stringField(body, "status"); status != "failed" {
 		t.Fatalf("status = %q, want failed for an unreachable provider", status)
 	}
-	if reason, _ := body["reason"].(string); reason == "" {
+	if reason := stringField(body, "reason"); reason == "" {
 		t.Fatal("failure must include a machine-readable reason")
 	}
 
@@ -322,31 +352,217 @@ func TestProviderConnectionStatusIsRecorded(t *testing.T) {
 	}
 }
 
+func (h *harness) attachProvider(t *testing.T, appID, shopID, secret string, isDefault bool) (*http.Response, map[string]any) {
+	t.Helper()
+	payload := map[string]any{
+		"provider":    "yookassa",
+		"shop_id":     shopID,
+		"secret_key":  secret,
+		"environment": "test",
+	}
+	if isDefault {
+		payload["is_default"] = true
+	}
+	return h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, payload)
+}
+
+func (h *harness) countDefaults(t *testing.T, appID string) int {
+	t.Helper()
+	var count int
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM application_providers WHERE application_id = $1 AND is_default`,
+		appID).Scan(&count); err != nil {
+		t.Fatalf("count defaults: %v", err)
+	}
+	return count
+}
+
 func TestOnlyOneDefaultProviderPerApplication(t *testing.T) {
 	h := newHarness(t)
-	appID, _ := h.createApplication(t, "SaaS")
+	app := h.createApplication(t, "SaaS")
 
-	for i, shop := range []string{"111", "222"} {
-		resp, body := h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, map[string]any{
-			"provider":    "yookassa",
-			"shop_id":     shop,
-			"secret_key":  "secret",
-			"environment": "test",
-			"is_default":  true,
-		})
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("attach provider %d: status %d, body %v", i, resp.StatusCode, body)
+	for _, shop := range []string{"111", "222"} {
+		if resp, body := h.attachProvider(t, app.id, shop, "secret", true); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("attach provider %s: status %d, body %v", shop, resp.StatusCode, body)
 		}
 	}
 
-	var defaults int
-	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM application_providers WHERE application_id = $1 AND is_default`,
-		appID).Scan(&defaults); err != nil {
-		t.Fatalf("count defaults: %v", err)
+	if got := h.countDefaults(t, app.id); got != 1 {
+		t.Fatalf("default provider count = %d, want 1", got)
 	}
-	if defaults != 1 {
-		t.Fatalf("default provider count = %d, want 1", defaults)
+}
+
+// Re-attaching an existing provider without is_default must not strip the
+// application of its default connection.
+func TestReattachingProviderKeepsDefault(t *testing.T) {
+	h := newHarness(t)
+	app := h.createApplication(t, "SaaS")
+
+	if resp, body := h.attachProvider(t, app.id, "123456", "secret", true); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first attach: status %d, body %v", resp.StatusCode, body)
+	}
+	if got := h.countDefaults(t, app.id); got != 1 {
+		t.Fatalf("default count after first attach = %d, want 1", got)
+	}
+
+	// Same shop, same secret, is_default omitted.
+	if resp, body := h.attachProvider(t, app.id, "123456", "secret", false); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("second attach: status %d, body %v", resp.StatusCode, body)
+	}
+	if got := h.countDefaults(t, app.id); got != 1 {
+		t.Fatalf("default count after re-attach = %d, want 1 (regression: default was cleared)", got)
+	}
+}
+
+// A different secret for an already connected shop must be refused rather than
+// silently ignored.
+func TestReattachingProviderWithDifferentSecretIsRejected(t *testing.T) {
+	h := newHarness(t)
+	app := h.createApplication(t, "SaaS")
+
+	if resp, body := h.attachProvider(t, app.id, "123456", "original-secret", true); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first attach: status %d, body %v", resp.StatusCode, body)
+	}
+
+	resp, body := h.attachProvider(t, app.id, "123456", "different-secret", false)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 when the secret differs; body %v", resp.StatusCode, body)
+	}
+
+	// The stored secret must be unchanged.
+	cipher, _ := security.NewCipher(masterKey, "")
+	var stored []byte
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT encrypted_secret_key FROM provider_accounts WHERE shop_id = '123456'`).Scan(&stored); err != nil {
+		t.Fatalf("read stored secret: %v", err)
+	}
+	decrypted, err := cipher.Decrypt(stored)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if string(decrypted) != "original-secret" {
+		t.Fatalf("stored secret = %q, want original-secret", decrypted)
+	}
+}
+
+func TestWebhookSecretIsIssuedOnceAndStoredEncrypted(t *testing.T) {
+	h := newHarness(t)
+	app := h.createApplication(t, "SaaS")
+
+	if app.webhookSecret == "" {
+		t.Fatal("webhook secret must be issued at creation")
+	}
+
+	var stored []byte
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT webhook_secret_encrypted FROM applications WHERE id = $1`, app.id).Scan(&stored); err != nil {
+		t.Fatalf("read stored webhook secret: %v", err)
+	}
+	if len(stored) == 0 {
+		t.Fatal("webhook secret was not persisted")
+	}
+	if bytes.Contains(stored, []byte(app.webhookSecret)) {
+		t.Fatal("webhook secret is stored in plaintext")
+	}
+
+	cipher, _ := security.NewCipher(masterKey, "")
+	decrypted, err := cipher.Decrypt(stored)
+	if err != nil {
+		t.Fatalf("stored webhook secret does not decrypt: %v", err)
+	}
+	if string(decrypted) != app.webhookSecret {
+		t.Fatal("stored webhook secret does not match the issued value")
+	}
+
+	// It must not be readable through the application API.
+	resp, body := h.request(t, http.MethodGet, "/admin/applications/"+app.id, adminToken, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get application: status %d", resp.StatusCode)
+	}
+	if _, leaked := body["webhook_secret"]; leaked {
+		t.Fatalf("webhook secret leaked through the application representation: %v", body)
+	}
+}
+
+func TestWebhookSecretRotation(t *testing.T) {
+	h := newHarness(t)
+	app := h.createApplication(t, "SaaS")
+
+	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/webhook-secret", adminToken, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("rotate: status %d, body %v", resp.StatusCode, body)
+	}
+	rotated := stringField(body, "webhook_secret")
+	if rotated == "" || rotated == app.webhookSecret {
+		t.Fatalf("rotation did not produce a new secret (got %q)", rotated)
+	}
+
+	cipher, _ := security.NewCipher(masterKey, "")
+	var stored []byte
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT webhook_secret_encrypted FROM applications WHERE id = $1`, app.id).Scan(&stored); err != nil {
+		t.Fatalf("read stored secret: %v", err)
+	}
+	decrypted, err := cipher.Decrypt(stored)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if string(decrypted) != rotated {
+		t.Fatal("stored secret does not match the rotated value")
+	}
+}
+
+func TestProductionRejectsInternalURLs(t *testing.T) {
+	h := newProductionHarness(t)
+
+	cases := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{"internal webhook host", map[string]any{
+			"name": "SaaS", "webhook_url": "https://webhook-sink:8080/events",
+		}},
+		{"private ip webhook", map[string]any{
+			"name": "SaaS", "webhook_url": "https://10.0.0.5/events",
+		}},
+		{"loopback webhook", map[string]any{
+			"name": "SaaS", "webhook_url": "https://127.0.0.1/events",
+		}},
+		{"metadata endpoint", map[string]any{
+			"name": "SaaS", "webhook_url": "http://169.254.169.254/latest/meta-data",
+		}},
+		{"plain http return url", map[string]any{
+			"name": "SaaS", "default_return_url": "http://example.com/billing",
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken, tc.payload)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 for %v; body %v", resp.StatusCode, tc.payload, body)
+			}
+		})
+	}
+
+	// A public https destination is still accepted.
+	resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken, map[string]any{
+		"name": "Public SaaS", "webhook_url": "https://93.184.216.34/events",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("public https url rejected: status %d, body %v", resp.StatusCode, body)
+	}
+}
+
+func TestDevelopmentAllowsInternalWebhookURL(t *testing.T) {
+	h := newHarness(t)
+
+	// The verification stand registers a webhook sink on the compose network.
+	resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken, map[string]any{
+		"name": "SaaS", "webhook_url": "http://webhook-sink:8080/payment-events",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("development must accept an internal webhook host: status %d, body %v", resp.StatusCode, body)
 	}
 }
 
@@ -358,8 +574,9 @@ func TestAdminApplicationValidation(t *testing.T) {
 		t.Fatalf("blank name: status %d, want 400", resp.StatusCode)
 	}
 
-	appID, _ := h.createApplication(t, "SaaS")
-	resp, _ = h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, map[string]any{
+	app := h.createApplication(t, "SaaS")
+
+	resp, _ = h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
 		"provider":    "yookassa",
 		"shop_id":     "1",
 		"secret_key":  "secret",
@@ -372,5 +589,32 @@ func TestAdminApplicationValidation(t *testing.T) {
 	resp, _ = h.request(t, http.MethodGet, "/admin/applications/not-a-uuid", adminToken, nil)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad uuid: status %d, want 400", resp.StatusCode)
+	}
+
+	// A conflict message must not leak database identifiers.
+	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
+		"provider":    "yookassa",
+		"shop_id":     "1",
+		"secret_key":  "secret",
+		"environment": "test",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("attach provider: status %d, body %v", resp.StatusCode, body)
+	}
+	resp, body = h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
+		"provider":    "yookassa",
+		"shop_id":     "1",
+		"secret_key":  "other",
+		"environment": "test",
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("conflicting secret: status %d, want 409", resp.StatusCode)
+	}
+	errObj, _ := body["error"].(map[string]any)
+	message := stringField(errObj, "message")
+	for _, leak := range []string{"pgx", "SQLSTATE", "constraint", "23505"} {
+		if strings.Contains(message, leak) {
+			t.Fatalf("conflict message leaks internals: %q", message)
+		}
 	}
 }

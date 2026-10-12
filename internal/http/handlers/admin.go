@@ -38,6 +38,8 @@ func (h *Admin) Register(r chi.Router) {
 	r.Get("/applications/{application_id}/keys", h.listAPIKeys)
 	r.Delete("/applications/{application_id}/keys/{key_id}", h.revokeAPIKey)
 
+	r.Post("/applications/{application_id}/webhook-secret", h.rotateWebhookSecret)
+
 	r.Post("/applications/{application_id}/providers", h.attachProvider)
 	r.Get("/applications/{application_id}/providers", h.listProviders)
 	r.Post("/providers/{provider_id}/test", h.testProvider)
@@ -49,7 +51,7 @@ func (h *Admin) createApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, key, err := h.apps.CreateApplication(r.Context(), applications.CreateApplicationInput{
+	app, provisioned, err := h.apps.CreateApplication(r.Context(), applications.CreateApplicationInput{
 		Name:             req.Name,
 		DefaultReturnURL: req.DefaultReturnURL,
 		WebhookURL:       req.WebhookURL,
@@ -60,8 +62,9 @@ func (h *Admin) createApplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, http.StatusCreated, dto.CreateApplicationResponse{
-		Application: dto.NewApplication(app),
-		APIKey:      dto.NewIssuedKey(key),
+		Application:   dto.NewApplication(app),
+		APIKey:        dto.NewIssuedKey(provisioned.APIKey),
+		WebhookSecret: provisioned.WebhookSecret,
 	})
 }
 
@@ -134,6 +137,22 @@ func (h *Admin) revokeAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rotateWebhookSecret issues a new HMAC signing secret. The previous secret
+// stops being valid for new deliveries as soon as this returns.
+func (h *Admin) rotateWebhookSecret(w http.ResponseWriter, r *http.Request) {
+	appID, ok := h.uuidParam(w, r, "application_id")
+	if !ok {
+		return
+	}
+
+	secret, err := h.apps.RotateWebhookSecret(r.Context(), appID)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	respond.JSON(w, http.StatusCreated, dto.WebhookSecretResponse{WebhookSecret: secret})
 }
 
 func (h *Admin) attachProvider(w http.ResponseWriter, r *http.Request) {

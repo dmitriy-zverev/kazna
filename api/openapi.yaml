@@ -437,6 +437,32 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /admin/applications/{application_id}/webhook-secret:
+    post:
+      tags: [Admin]
+      summary: Rotate the webhook signing secret
+      description: |
+        Issues a new HMAC-SHA256 signing secret and returns it once. The previous
+        secret stops being valid for new deliveries immediately.
+      operationId: adminRotateWebhookSecret
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      responses:
+        "201":
+          description: New signing secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /admin/applications/{application_id}/providers:
     post:
       tags: [Admin]
@@ -815,12 +841,24 @@ components:
 
     CreateApplicationResponse:
       type: object
-      required: [application, api_key]
+      required: [application, api_key, webhook_secret]
       properties:
         application:
           $ref: "#/components/schemas/Application"
         api_key:
           $ref: "#/components/schemas/IssuedAPIKey"
+        webhook_secret:
+          type: string
+          description: |
+            HMAC-SHA256 signing secret for outgoing events. Returned exactly
+            once, at creation; rotate through the webhook-secret endpoint.
+
+    WebhookSecretResponse:
+      type: object
+      required: [webhook_secret]
+      properties:
+        webhook_secret:
+          type: string
 
     IssuedAPIKey:
       type: object

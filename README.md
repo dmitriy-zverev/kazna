@@ -75,11 +75,16 @@ The admin API is the only way to create clients until the dashboard exists.
 It requires `ADMIN_TOKEN`; when that is unset the admin API answers 503.
 
 ```bash
-# Create an application; the API key is returned once.
+# Create an application. The API key and the webhook signing secret are
+# returned once and cannot be retrieved again.
 curl -sS -X POST localhost:18080/admin/applications \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"My SaaS"}'
+
+# Rotate the webhook signing secret (invalidates the previous one).
+curl -sS -X POST localhost:18080/admin/applications/<app_id>/webhook-secret \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 
 # Connect a YooKassa store (secret is encrypted at rest, never returned).
 curl -sS -X POST localhost:18080/admin/applications/<app_id>/providers \

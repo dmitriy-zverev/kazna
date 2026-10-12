@@ -58,7 +58,7 @@ func run() error {
 		return err
 	}
 
-	apps := applications.NewService(pool, cipher)
+	apps := applications.NewService(pool, cipher, applications.Options{Production: cfg.IsProduction()})
 	if !cfg.AdminEnabled() {
 		logger.Warn("api: admin API is disabled because ADMIN_TOKEN is not set")
 	}

@@ -27,11 +27,18 @@ type CreateApplicationRequest struct {
 	WebhookURL       *string `json:"webhook_url"`
 }
 
-// CreateApplicationResponse returns the application and its first API key. The
-// key is present only in this response.
+// CreateApplicationResponse returns the application with its one-time
+// credentials. Neither secret is retrievable again.
 type CreateApplicationResponse struct {
 	Application Application `json:"application"`
 	APIKey      IssuedKey   `json:"api_key"`
+	// WebhookSecret signs outgoing events; shown once (docs/RELIABILITY.md §6).
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// WebhookSecretResponse returns a freshly rotated signing secret.
+type WebhookSecretResponse struct {
+	WebhookSecret string `json:"webhook_secret"`
 }
 
 // IssuedKey carries a key that will never be shown again.

@@ -1,9 +1,12 @@
 -- Queries for applications, API keys and provider connections.
 
 -- name: CreateApplication :one
-INSERT INTO applications (name, slug, default_return_url, webhook_url)
-VALUES ($1, $2, $3, $4)
+INSERT INTO applications (name, slug, default_return_url, webhook_url, webhook_secret_encrypted)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
+
+-- name: UpdateApplicationWebhookSecret :exec
+UPDATE applications SET webhook_secret_encrypted = $2 WHERE id = $1;
 
 -- name: GetApplication :one
 SELECT * FROM applications WHERE id = $1;

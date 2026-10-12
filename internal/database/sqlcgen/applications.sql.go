@@ -82,16 +82,17 @@ func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (Api
 
 const createApplication = `-- name: CreateApplication :one
 
-INSERT INTO applications (name, slug, default_return_url, webhook_url)
-VALUES ($1, $2, $3, $4)
+INSERT INTO applications (name, slug, default_return_url, webhook_url, webhook_secret_encrypted)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, name, slug, status, default_return_url, webhook_url, webhook_secret_encrypted, created_at, updated_at
 `
 
 type CreateApplicationParams struct {
-	Name             string  `json:"name"`
-	Slug             string  `json:"slug"`
-	DefaultReturnUrl *string `json:"default_return_url"`
-	WebhookUrl       *string `json:"webhook_url"`
+	Name                   string  `json:"name"`
+	Slug                   string  `json:"slug"`
+	DefaultReturnUrl       *string `json:"default_return_url"`
+	WebhookUrl             *string `json:"webhook_url"`
+	WebhookSecretEncrypted []byte  `json:"webhook_secret_encrypted"`
 }
 
 // Queries for applications, API keys and provider connections.
@@ -101,6 +102,7 @@ func (q *Queries) CreateApplication(ctx context.Context, arg CreateApplicationPa
 		arg.Slug,
 		arg.DefaultReturnUrl,
 		arg.WebhookUrl,
+		arg.WebhookSecretEncrypted,
 	)
 	var i Application
 	err := row.Scan(
@@ -435,6 +437,20 @@ WHERE id = $1
 
 func (q *Queries) TouchAPIKeyLastUsed(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, touchAPIKeyLastUsed, id)
+	return err
+}
+
+const updateApplicationWebhookSecret = `-- name: UpdateApplicationWebhookSecret :exec
+UPDATE applications SET webhook_secret_encrypted = $2 WHERE id = $1
+`
+
+type UpdateApplicationWebhookSecretParams struct {
+	ID                     pgtype.UUID `json:"id"`
+	WebhookSecretEncrypted []byte      `json:"webhook_secret_encrypted"`
+}
+
+func (q *Queries) UpdateApplicationWebhookSecret(ctx context.Context, arg UpdateApplicationWebhookSecretParams) error {
+	_, err := q.db.Exec(ctx, updateApplicationWebhookSecret, arg.ID, arg.WebhookSecretEncrypted)
 	return err
 }
 
