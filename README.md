@@ -20,6 +20,8 @@ Go 1.26 · chi · pgx v5 · sqlc · golang-migrate · PostgreSQL 17 · Docker Co
 | `docs/PAYMENT_LIFECYCLE.md` | States, transitions, idempotency |
 | `docs/RELIABILITY.md` | Recovery, retries, event delivery |
 | `docs/SECURITY.md` | Key storage, isolation, URL validation |
+| `docs/FINANCIAL_INVARIANTS.md` | Non-negotiable payment rules for acceptance |
+| `docs/VERIFICATION_HARNESS.md` | Env seams for independent black-box testing |
 | `api/openapi.yaml` | External API contract |
 
 ## Quick start (Docker)
@@ -37,6 +39,8 @@ Postgres is not exposed to the host by default; uncomment the port mapping in
 
 Migrations are applied automatically when the API starts. Stop with
 `make compose-down`.
+
+Release acceptance of the mandatory scenarios runs in the separate [kazna-verification](https://github.com/dmitriy-zverev/kazna-verification) repository against a built Docker image. In-repo integration tests remain required and run in this repo's CI, but they do not replace that acceptance.
 
 ## Local development
 

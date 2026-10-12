@@ -30,7 +30,7 @@
 В дальнейшем для создания оплаты достаточно:
 
 ```python
-from paycore import PaymentClient
+from kazna import PaymentClient
 
 payments = PaymentClient(
     api_key="app_live_xxxxxxxxx",
@@ -192,7 +192,7 @@ PostgreSQL выступает единым источником достовер
 Предлагаю следующую организацию репозитория:
 
 ```text
-paycore/
+kazna/
 │
 ├── cmd/
 │   ├── api/
@@ -1061,7 +1061,7 @@ refund = await payments.refund(
 
 ```python
 from fastapi import FastAPI
-from paycore.integrations.fastapi import payment_router
+from kazna.integrations.fastapi import payment_router
 
 app = FastAPI()
 
@@ -1133,7 +1133,7 @@ SDK должен иметь типизированные запросы и от�
 Главный экран:
 
 ```text
-PAYCORE
+KAZNA
 ───────────────────────────────────────────
 
 Applications
@@ -1265,8 +1265,8 @@ API-ключи приложений не должны давать доступ 
 Для первой версии:
 
 ```text
-paycore-api
-paycore-worker
+kazna-api
+kazna-worker
 postgres
 caddy
 ```
@@ -1297,6 +1297,13 @@ LOG_LEVEL=info
 WORKER_CONCURRENCY=5
 
 PAYMENT_POLL_INTERVAL=30s
+
+# Provider integration (see VERIFICATION_HARNESS.md).
+# Base URL of the YooKassa API; overridden on the stand to point at the emulator.
+YOOKASSA_API_URL=https://api.yookassa.ru
+# How long a repeated provider idempotency key is treated as the same request.
+# Shortened on the stand (e.g. 30s) so expiry tests do not wait a day.
+PROVIDER_IDEMPOTENCY_WINDOW=24h
 ```
 
 Это пример предполагаемого конфигурационного интерфейса.
@@ -1475,7 +1482,9 @@ GET /metrics
 
 Официальный тестовый режим позволяет проверять платежи и основную функциональность API без реального движения денег. [ЮKassa](https://yookassa.ru/developers/payment-acceptance/testing-and-going-live/testing?utm_source=chatgpt.com)
 
-**Критерий готовности:** все обязательные сценарии проходят автоматически, а выявленные ошибки воспроизводятся отдельными тестами.
+Тесты этого этапа живут внутри репозитория Казны и выполняются в его CI. Обязательная приёмка тех же сценариев (раздел 15) дополнительно прогоняется чёрным ящиком в [kazna-verification](https://github.com/dmitriy-zverev/kazna-verification) против собранного Docker-образа (см. [VERIFICATION_HARNESS.md](VERIFICATION_HARNESS.md)). Внутренние тесты не заменяют приёмку, но остаются обязательными.
+
+**Критерий готовности:** все обязательные сценарии проходят автоматически во внутренних тестах, а приёмочный прогон в kazna-verification зелёный; выявленные ошибки воспроизводятся отдельными тестами.
 
 ## Этап 8. Production-подготовка
 
@@ -1496,6 +1505,8 @@ GET /metrics
 # 15. Какие тесты обязательны перед релизом
 
 Я выделяю этот раздел отдельно, потому что платёжная инфраструктура не должна считаться готовой только после успешного прохождения happy path.
+
+Автоматическое исполнение таблицы ниже и проверка [финансовых инвариантов](FINANCIAL_INVARIANTS.md) выполняются **независимым репозиторием** [kazna-verification](https://github.com/dmitriy-zverev/kazna-verification) против собранного Docker-образа Казны. Конфигурационные швы для стенда описаны в [VERIFICATION_HARNESS.md](VERIFICATION_HARNESS.md). Unit- и integration-тесты внутри репозитория Казны не заменяют эту приёмку.
 
 | Сценарий | Ожидаемое поведение |
 |---|---|
@@ -1713,7 +1724,7 @@ payment = await payments.pay(
                           ▼
                 ┌──────────────────┐
                 │                  │
-                │     PAYCORE      │
+                │     KAZNA        │
                 │                  │
                 │   Auth + API     │
                 │   Payments       │
