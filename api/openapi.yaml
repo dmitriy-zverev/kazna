@@ -27,6 +27,8 @@ tags:
   - name: Payments
   - name: Orders
   - name: Refunds
+  - name: Applications
+  - name: Admin
   - name: Health
 
 security:
@@ -261,6 +263,270 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /v1/me:
+    get:
+      tags: [Applications]
+      summary: Identify the authenticated application
+      description: |
+        Returns the application that owns the presented API key. Useful for
+        verifying that isolation works and for debugging SDK configuration.
+      operationId: getMe
+      responses:
+        "200":
+          description: The authenticated application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/applications:
+    post:
+      tags: [Admin]
+      summary: Create an application
+      description: |
+        Creates an application and issues its first API key in one step. The API
+        key is returned once and cannot be retrieved again.
+      operationId: adminCreateApplication
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApplicationRequest"
+      responses:
+        "201":
+          description: Application created with its first API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApplicationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AdminDisabled"
+    get:
+      tags: [Admin]
+      summary: List applications
+      operationId: adminListApplications
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: All applications
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/AdminDisabled"
+
+  /admin/applications/{application_id}:
+    get:
+      tags: [Admin]
+      summary: Get an application
+      operationId: adminGetApplication
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      responses:
+        "200":
+          description: Application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/applications/{application_id}/keys:
+    post:
+      tags: [Admin]
+      summary: Issue an additional API key
+      operationId: adminCreateAPIKey
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAPIKeyRequest"
+      responses:
+        "201":
+          description: Key issued; the secret is present only here
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedAPIKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      tags: [Admin]
+      summary: List API keys
+      description: Returns key metadata only; key material is never available.
+      operationId: adminListAPIKeys
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      responses:
+        "200":
+          description: Key metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/APIKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/applications/{application_id}/keys/{key_id}:
+    delete:
+      tags: [Admin]
+      summary: Revoke an API key
+      operationId: adminRevokeAPIKey
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+        - name: key_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Key revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/applications/{application_id}/providers:
+    post:
+      tags: [Admin]
+      summary: Connect a provider store
+      description: |
+        Stores the provider secret encrypted with AES-256-GCM. If the same
+        `(provider, shop_id, environment)` already exists it is reused and its
+        stored secret is left untouched. The secret is never returned.
+      operationId: adminAttachProvider
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachProviderRequest"
+      responses:
+        "201":
+          description: Provider connection stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      tags: [Admin]
+      summary: List provider connections
+      operationId: adminListProviders
+      security:
+        - adminAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ApplicationID"
+      responses:
+        "200":
+          description: Provider connections without secrets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProviderAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/providers/{provider_id}/test:
+    post:
+      tags: [Admin]
+      summary: Test a provider connection
+      description: |
+        Performs a read-only provider request that never creates a payment, and
+        records the resulting connection status. A failed check returns 200 with
+        `status: failed` and a machine-readable reason.
+      operationId: adminTestProvider
+      security:
+        - adminAuth: []
+      parameters:
+        - name: provider_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Result of the connectivity check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderTestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -269,6 +535,14 @@ components:
       bearerFormat: app_live_xxxxx
       description: |
         Application API key. Server-side only; never embed it in browser code.
+    adminAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Provisional administrative token (ADMIN_TOKEN). Separate from
+        application keys: an application key never grants admin access. When the
+        token is unconfigured the admin API returns 503 and is never open.
+        Replaced by administrator sessions in a later stage.
 
   parameters:
     IdempotencyKey:
@@ -290,6 +564,13 @@ components:
         type: string
         pattern: "^pay_[A-Za-z0-9]+$"
         example: pay_abc123
+    ApplicationID:
+      name: application_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -306,6 +587,12 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    AdminDisabled:
+      description: Admin API is disabled because ADMIN_TOKEN is not configured
       content:
         application/json:
           schema:
@@ -473,6 +760,183 @@ components:
           type: string
           format: date-time
 
+    Me:
+      type: object
+      required: [application_id, name, slug]
+      properties:
+        application_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+
+    Application:
+      type: object
+      required: [id, name, slug, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        default_return_url:
+          type: [string, "null"]
+          format: uri
+        webhook_url:
+          type: [string, "null"]
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateApplicationRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        default_return_url:
+          type: [string, "null"]
+          format: uri
+        webhook_url:
+          type: [string, "null"]
+          format: uri
+
+    CreateApplicationResponse:
+      type: object
+      required: [application, api_key]
+      properties:
+        application:
+          $ref: "#/components/schemas/Application"
+        api_key:
+          $ref: "#/components/schemas/IssuedAPIKey"
+
+    IssuedAPIKey:
+      type: object
+      required: [id, name, prefix, api_key, created_at]
+      description: Returned exactly once, at issuance.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          description: Public lookup prefix stored with the key hash.
+        api_key:
+          type: string
+          description: The only time this value is ever returned.
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    APIKey:
+      type: object
+      required: [id, name, prefix, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    CreateAPIKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+
+    AttachProviderRequest:
+      type: object
+      required: [provider, shop_id, secret_key, environment]
+      properties:
+        provider:
+          type: string
+          enum: [yookassa]
+        shop_id:
+          type: string
+          maxLength: 64
+        secret_key:
+          type: string
+          description: Stored encrypted with AES-256-GCM; never returned.
+        environment:
+          type: string
+          enum: [test, production]
+        is_default:
+          type: boolean
+
+    ProviderAccount:
+      type: object
+      required: [id, provider, shop_id, environment, status, is_default, created_at, updated_at]
+      description: A provider connection. The secret is never included.
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [yookassa]
+        shop_id:
+          type: string
+        environment:
+          type: string
+          enum: [test, production]
+        status:
+          type: string
+          enum: [active, needs_attention, disabled]
+        is_default:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProviderTestResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [connected, failed]
+        reason:
+          type: string
+          description: Normalized provider error code when status is `failed`.
+
     ErrorEnvelope:
       type: object
       required: [error]
@@ -496,6 +960,8 @@ components:
       enum:
         - INVALID_REQUEST
         - UNAUTHORIZED
+        - NOT_FOUND
+        - CONFLICT
         - PAYMENT_NOT_FOUND
         - IDEMPOTENCY_CONFLICT
         - PAYMENT_ALREADY_SUCCEEDED

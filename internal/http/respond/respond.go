@@ -12,6 +12,8 @@ import (
 const (
 	CodeInvalidRequest          = "INVALID_REQUEST"
 	CodeUnauthorized            = "UNAUTHORIZED"
+	CodeNotFound                = "NOT_FOUND"
+	CodeConflict                = "CONFLICT"
 	CodePaymentNotFound         = "PAYMENT_NOT_FOUND"
 	CodeIdempotencyConflict     = "IDEMPOTENCY_CONFLICT"
 	CodePaymentAlreadySucceeded = "PAYMENT_ALREADY_SUCCEEDED"

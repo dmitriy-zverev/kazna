@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Stage 1 baseline. This document is the standing context for AI agents
+Status: Stage 2 baseline. This document is the standing context for AI agents
 working on the repository. It records decisions that must not be silently
 reversed.
 
@@ -55,19 +55,24 @@ internal/config                    environment configuration
 internal/logging                   structured JSON logging
 internal/version                   build metadata
 internal/database                  pool, migrations, sqlc-backed helpers
-internal/http                      router, handlers, middleware, respond
+internal/applications              applications, API keys, provider connections
+internal/auth                      API key and admin token middleware
+internal/credentials               API key generation, hashing, verification
+internal/security                  AES-256-GCM cipher with key rotation
+internal/providers/yookassa        YooKassa adapter (connection check in Stage 2)
+internal/http                      router, handlers, middleware, respond, dto
 internal/database/sqlcgen          generated query code (do not edit)
 migrations/                        embedded SQL migrations
 db/queries/                        sqlc query sources
+tests/integration/                 black-box tests against real PostgreSQL
 api/openapi.yaml                   external contract
 deploy/                            compose.yaml, Caddyfile
 docs/                              this documentation set
 ```
 
-Packages added in later stages: `internal/applications`, `internal/auth`,
-`internal/credentials`, `internal/payments`, `internal/providers/yookassa`,
-`internal/webhooks`, `internal/outbox`, `internal/delivery`,
-`internal/reconciliation`, `internal/security`, `dashboard/`, `sdk/`.
+Packages added in later stages: `internal/payments`, `internal/webhooks`,
+`internal/outbox`, `internal/delivery`, `internal/reconciliation`, `dashboard/`,
+`sdk/`.
 
 ## 5. Dependency rules
 
@@ -84,17 +89,24 @@ Packages added in later stages: `internal/applications`, `internal/auth`,
 Dependency direction: `http` → `payments` → `providers`; `database` is a leaf
 used by domain services. Domain packages must not import `http`.
 
-## 6. Request lifecycle (Stage 1)
+## 6. Request lifecycle (Stage 2)
 
 ```
 client → Caddy (optional) → chi router
          ├─ RequestID, RealIP, RequestLogger, Recoverer, Timeout
-         ├─ GET /health/live   → 200 always (no dependencies)
-         └─ GET /health/ready  → 200 / 503 (runs a DB query via sqlc)
+         ├─ GET  /health/live        → 200 always (no dependencies)
+         ├─ GET  /health/ready       → 200 / 503 (runs a DB query via sqlc)
+         ├─ GET  /v1/me              → API-key authenticated
+         └─ /admin/*                 → admin token authenticated
 ```
 
-Unmatched routes and methods return the normalized error envelope from
+Unauthenticated requests to `/v1/*` are rejected with 401 before routing
+resolves, so the API surface cannot be enumerated without a key. Unmatched
+routes and methods return the normalized error envelope from
 `internal/http/respond`.
+
+Authentication resolves to an `applications.Authenticated` value in the request
+context. `application_id` is never read from a request body or query string.
 
 ## 7. Deployment
 

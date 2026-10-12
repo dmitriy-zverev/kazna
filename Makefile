@@ -30,6 +30,14 @@ build: ## Compile all binaries into ./bin
 test: ## Run unit tests
 	$(GO) test ./...
 
+.PHONY: test-integration
+test-integration: ## Run integration tests against a real PostgreSQL (requires Docker)
+	$(GO) test -tags integration -count=1 ./tests/integration/...
+
+.PHONY: keygen
+keygen: ## Print a fresh MASTER_ENCRYPTION_KEY
+	@openssl rand -hex 32
+
 .PHONY: vet
 vet: ## Run go vet
 	$(GO) vet ./...

@@ -13,11 +13,17 @@ x-app-env: &app-env
   APP_ENV: ${APP_ENV:-development}
   PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
   DATABASE_URL: postgres://${POSTGRES_USER:-kazna}:${POSTGRES_PASSWORD:-kazna}@postgres:5432/${POSTGRES_DB:-kazna}?sslmode=disable
-  MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-}
+  # DEV ONLY defaults so `docker compose up` works out of the box. Generate real
+  # values for anything non-local: `make keygen` and `openssl rand -hex 24`.
+  MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-9f2c1e7a4b6d8f0a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d0f2a4c6e8b0d1f3a}
+  MASTER_ENCRYPTION_PREVIOUS_KEYS: ${MASTER_ENCRYPTION_PREVIOUS_KEYS:-}
+  ADMIN_TOKEN: ${ADMIN_TOKEN:-dev-admin-token}
   ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
   PAYMENT_POLL_INTERVAL: ${PAYMENT_POLL_INTERVAL:-30s}
+  YOOKASSA_API_URL: ${YOOKASSA_API_URL:-https://api.yookassa.ru}
+  PROVIDER_IDEMPOTENCY_WINDOW: ${PROVIDER_IDEMPOTENCY_WINDOW:-24h}
 
 services:
   postgres:

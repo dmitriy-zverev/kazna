@@ -11,10 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dmitriy-zverev/kazna/internal/applications"
 	"github.com/dmitriy-zverev/kazna/internal/config"
 	"github.com/dmitriy-zverev/kazna/internal/database"
 	httpserver "github.com/dmitriy-zverev/kazna/internal/http"
 	"github.com/dmitriy-zverev/kazna/internal/logging"
+	"github.com/dmitriy-zverev/kazna/internal/security"
 	"github.com/dmitriy-zverev/kazna/internal/version"
 )
 
@@ -51,9 +53,24 @@ func run() error {
 	}
 	defer pool.Close()
 
+	cipher, err := security.NewCipher(cfg.MasterEncryptionKey, cfg.MasterEncryptionPreviousKeys)
+	if err != nil {
+		return err
+	}
+
+	apps := applications.NewService(pool, cipher)
+	if !cfg.AdminEnabled() {
+		logger.Warn("api: admin API is disabled because ADMIN_TOKEN is not set")
+	}
+
 	srv := &nethttp.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.NewRouter(logger, database.NewChecker(pool), cfg),
+		Addr: cfg.HTTPAddr,
+		Handler: httpserver.NewRouter(httpserver.Deps{
+			Logger:       logger,
+			Config:       cfg,
+			Health:       database.NewChecker(pool),
+			Applications: apps,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -3,3 +3,50 @@
 //   sqlc v1.31.1
 
 package sqlcgen
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type ApiKey struct {
+	ID            pgtype.UUID        `json:"id"`
+	ApplicationID pgtype.UUID        `json:"application_id"`
+	KeyPrefix     string             `json:"key_prefix"`
+	KeyHash       []byte             `json:"key_hash"`
+	Name          string             `json:"name"`
+	Permissions   []string           `json:"permissions"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type Application struct {
+	ID                     pgtype.UUID        `json:"id"`
+	Name                   string             `json:"name"`
+	Slug                   string             `json:"slug"`
+	Status                 string             `json:"status"`
+	DefaultReturnUrl       *string            `json:"default_return_url"`
+	WebhookUrl             *string            `json:"webhook_url"`
+	WebhookSecretEncrypted []byte             `json:"webhook_secret_encrypted"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ApplicationProvider struct {
+	ApplicationID     pgtype.UUID        `json:"application_id"`
+	ProviderAccountID pgtype.UUID        `json:"provider_account_id"`
+	IsDefault         bool               `json:"is_default"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ProviderAccount struct {
+	ID                 pgtype.UUID        `json:"id"`
+	Provider           string             `json:"provider"`
+	ShopID             string             `json:"shop_id"`
+	EncryptedSecretKey []byte             `json:"encrypted_secret_key"`
+	Environment        string             `json:"environment"`
+	Status             string             `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
