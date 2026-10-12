@@ -770,9 +770,13 @@ components:
       properties:
         id:
           type: string
+          format: uuid
         status:
           type: string
-          enum: [creating, creation_unknown]
+          description: |
+            `created` or `creating` means the provider call has not finished;
+            `creation_unknown` means it may have been applied.
+          enum: [created, creating, creation_unknown]
         checkout_url:
           type: [string, "null"]
         retry_after:

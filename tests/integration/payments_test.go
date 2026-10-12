@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func newPaymentHarness(t *testing.T) (*harness, *fakeYooKassa) {
@@ -498,6 +499,92 @@ func TestAttemptsEndpointRejectsPaidOrder(t *testing.T) {
 	}
 	if code := errorCode(body); code != "PAYMENT_ALREADY_SUCCEEDED" {
 		t.Fatalf("code = %q, want PAYMENT_ALREADY_SUCCEEDED", code)
+	}
+}
+
+func TestConcurrentSameKeyNeverReturnsHollowSuccess(t *testing.T) {
+	h, fake := newPaymentHarness(t)
+	app := h.provisionApp(t, "SaaS")
+
+	// Slow the provider so a loser of the idempotency race replays while the
+	// winner is still inside the provider call.
+	fake.mu.Lock()
+	fake.createDelay = 150 * time.Millisecond
+	fake.mu.Unlock()
+
+	const workers = 4
+	type outcome struct {
+		code   int
+		id     string
+		status string
+	}
+	results := make([]outcome, workers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+
+			body, err := json.Marshal(paymentPayload("order_same_key", 49900))
+			if err != nil {
+				return
+			}
+			req, err := http.NewRequest(http.MethodPost, h.server.URL+"/v1/payments", bytes.NewReader(body))
+			if err != nil {
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+app.apiKey)
+			req.Header.Set("Idempotency-Key", "shared-key")
+
+			resp, err := h.server.Client().Do(req)
+			if err != nil {
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			payload, _ := io.ReadAll(resp.Body)
+
+			var decoded map[string]any
+			_ = json.Unmarshal(payload, &decoded)
+			results[index] = outcome{
+				code:   resp.StatusCode,
+				id:     stringField(decoded, "id"),
+				status: stringField(decoded, "status"),
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	firstID := ""
+	for i, result := range results {
+		if result.id == "" {
+			t.Fatalf("worker %d produced no payment id", i)
+		}
+		if firstID == "" {
+			firstID = result.id
+		}
+		if result.id != firstID {
+			t.Fatalf("worker %d returned payment %s, want %s", i, result.id, firstID)
+		}
+
+		switch result.status {
+		case "created", "creating", "creation_unknown":
+			// No checkout URL exists yet, so the client must be told to retry.
+			if result.code != http.StatusAccepted {
+				t.Fatalf("worker %d: status %q with HTTP %d, want 202 (hollow 201)", i, result.status, result.code)
+			}
+		case "pending":
+			if result.code != http.StatusCreated {
+				t.Fatalf("worker %d: pending with HTTP %d, want 201", i, result.code)
+			}
+		default:
+			t.Fatalf("worker %d: unexpected status %q", i, result.status)
+		}
+	}
+
+	if create, _ := fake.counts(); create != 1 {
+		t.Fatalf("provider create calls = %d, want 1", create)
 	}
 }
 

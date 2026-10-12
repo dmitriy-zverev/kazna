@@ -26,6 +26,13 @@ SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
 FROM payments
 WHERE application_id = $1 AND order_id = $2;
 
+-- name: LockOrderForPayment :exec
+-- Serializes payment creation per (application, order) so the "order already
+-- paid" check and the insert cannot interleave with a concurrent success.
+SELECT pg_advisory_xact_lock(
+    hashtextextended(sqlc.arg('application_id')::text || ':' || sqlc.arg('order_id')::text, 0)
+);
+
 -- name: OrderHasSucceededPayment :one
 SELECT EXISTS (
     SELECT 1 FROM payments

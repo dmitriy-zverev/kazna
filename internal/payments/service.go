@@ -168,9 +168,12 @@ func (s *Service) replay(ctx context.Context, appID uuid.UUID, row sqlcgen.Idemp
 	}
 	s.recordCreation(OutcomeReplayed)
 	return CreateResult{
-		Payment:           payment,
-		Replayed:          true,
-		Pending:           payment.Status == StatusCreationUnknown,
+		Payment:  payment,
+		Replayed: true,
+		// A payment with no checkout URL yet is not actionable for the client:
+		// it is still being created, or the provider call has not happened.
+		// Reporting 201 there would hand back a hollow success.
+		Pending:           !payment.Status.Terminal() && payment.CheckoutURL == nil,
 		RetryAfterSeconds: 2,
 	}, nil
 }
@@ -196,6 +199,40 @@ func (s *Service) createLocal(
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := s.q.WithTx(tx)
+
+	// Serialize creation per (application, order). Without this, the
+	// "already paid" check below and the insert could interleave with a
+	// concurrent success: the partial unique index stops two *active* attempts,
+	// but a payment that becomes terminal in that window would no longer be
+	// covered by it, and a second attempt for a paid order could be created.
+	if err := q.LockOrderForPayment(ctx, sqlcgen.LockOrderForPaymentParams{
+		ApplicationID: app.ID.String(),
+		OrderID:       in.OrderID,
+	}); err != nil {
+		return localCreation{}, err
+	}
+
+	// Authoritative check, inside the lock.
+	if paid, err := q.OrderHasSucceededPayment(ctx, sqlcgen.OrderHasSucceededPaymentParams{
+		ApplicationID: database.ToUUID(app.ID),
+		OrderID:       in.OrderID,
+	}); err != nil {
+		return localCreation{}, err
+	} else if paid {
+		return localCreation{}, ErrOrderAlreadySucceeded
+	}
+
+	// Re-check idempotency now that the order is locked. A concurrent request
+	// with the same key that won the race has already committed its record, and
+	// the caller must replay it rather than be told about a conflict.
+	if _, err := q.GetIdempotencyRequest(ctx, sqlcgen.GetIdempotencyRequestParams{
+		ApplicationID:  database.ToUUID(app.ID),
+		IdempotencyKey: idempotencyKey,
+	}); err == nil {
+		return localCreation{}, errIdempotencyRace
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return localCreation{}, err
+	}
 
 	attempt, err := q.NextAttemptNumber(ctx, sqlcgen.NextAttemptNumberParams{
 		ApplicationID: database.ToUUID(app.ID),

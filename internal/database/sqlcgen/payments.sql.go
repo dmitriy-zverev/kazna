@@ -344,6 +344,24 @@ func (q *Queries) ListPaymentsForApplication(ctx context.Context, arg ListPaymen
 	return items, nil
 }
 
+const lockOrderForPayment = `-- name: LockOrderForPayment :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended($1::text || ':' || $2::text, 0)
+)
+`
+
+type LockOrderForPaymentParams struct {
+	ApplicationID string `json:"application_id"`
+	OrderID       string `json:"order_id"`
+}
+
+// Serializes payment creation per (application, order) so the "order already
+// paid" check and the insert cannot interleave with a concurrent success.
+func (q *Queries) LockOrderForPayment(ctx context.Context, arg LockOrderForPaymentParams) error {
+	_, err := q.db.Exec(ctx, lockOrderForPayment, arg.ApplicationID, arg.OrderID)
+	return err
+}
+
 const markPaymentCreating = `-- name: MarkPaymentCreating :exec
 UPDATE payments SET status = 'creating' WHERE id = $1 AND status = 'created'
 `
