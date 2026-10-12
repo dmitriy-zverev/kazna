@@ -16,11 +16,15 @@ Before any external call, a row is written to `payment_operations` with:
 - the operation type,
 - the provider idempotency key,
 - a hash and a copy of the immutable request parameters,
-- attempt count and last error.
+- attempt count and last error,
+- the deadline of the provider's idempotency guarantee.
 
 If the connection drops mid-call, the record already exists and the worker can
 recover it. The stored request parameters are sufficient to replay the call
 unchanged. No secrets or customer PII are stored here.
+
+Implemented in Stage 3 for `create_payment`. `get_payment` operations are
+recorded by the Stage 4 reconciliation worker, which owns status reads.
 
 ## 3. Status tracking without webhooks
 

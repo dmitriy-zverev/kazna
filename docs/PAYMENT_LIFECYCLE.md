@@ -1,7 +1,7 @@
 # Payment lifecycle
 
-Status: Stage 1 baseline. Defines the internal state machine, allowed
-transitions and idempotency rules. Implementation lands in Stage 3.
+Status: Stage 3 baseline. The state machine, idempotency and the create/read
+cycle are implemented; the background sweep arrives in Stage 4.
 
 ## 1. States
 
@@ -82,3 +82,9 @@ existed. This is a safety requirement, not an optimization.
 The provider is authoritative for payment outcome. Our database is authoritative
 for identity, ownership and delivery state. Reconciliation (see
 `docs/RELIABILITY.md`) keeps the two aligned.
+
+In Stage 3 the alignment is done on read: `GET /v1/payments/{id}` refreshes an
+unfinished payment from the provider once `next_check_at` has passed. The
+refresh is best effort and only applies a legal transition, so a stale provider
+read cannot roll a succeeded payment back. The Stage 4 worker adds the
+background sweep that removes the dependence on client traffic.

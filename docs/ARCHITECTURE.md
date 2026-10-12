@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Stage 2 baseline. This document is the standing context for AI agents
+Status: Stage 3 baseline. This document is the standing context for AI agents
 working on the repository. It records decisions that must not be silently
 reversed.
 
@@ -58,8 +58,11 @@ internal/database                  pool, migrations, sqlc-backed helpers
 internal/applications              applications, API keys, provider connections
 internal/auth                      API key and admin token middleware
 internal/credentials               API key generation, hashing, verification
-internal/security                  AES-256-GCM cipher with key rotation
-internal/providers/yookassa        YooKassa adapter (connection check in Stage 2)
+internal/security                  AES-256-GCM cipher, outbound URL validation
+internal/payments                  payment domain, state machine, service
+internal/providers                 provider-agnostic contract and error codes
+internal/providers/yookassa        YooKassa adapter
+internal/metrics                   Prometheus collectors
 internal/http                      router, handlers, middleware, respond, dto
 internal/database/sqlcgen          generated query code (do not edit)
 migrations/                        embedded SQL migrations
@@ -70,9 +73,8 @@ deploy/                            compose.yaml, Caddyfile
 docs/                              this documentation set
 ```
 
-Packages added in later stages: `internal/payments`, `internal/webhooks`,
-`internal/outbox`, `internal/delivery`, `internal/reconciliation`, `dashboard/`,
-`sdk/`.
+Packages added in later stages: `internal/webhooks`, `internal/outbox`,
+`internal/delivery`, `internal/reconciliation`, `dashboard/`, `sdk/`.
 
 ## 5. Dependency rules
 
@@ -120,7 +122,24 @@ named volume. Caddy terminates TLS and hides `/health/*` from the public.
 - `make build`, `make test`, `make lint`, `make generate`.
 - Version metadata is injected with `-ldflags` into `internal/version`.
 
-## 9. Open decisions
+## 9. Decisions and open items
 
-- YooKassa fiscalization mode for the first release (`docs/TECHNICAL_PLAN.md` §7.4).
-- Allowed return/webhook URL policy per application (`docs/SECURITY.md` §4).
+Recorded decisions (do not silently reverse):
+
+- **No receipts in MVP.** The YooKassa adapter does not send a `receipt` block.
+  Consequence: shops that require fiscalization will reject payment creation
+  with `INVALID_REQUEST` until receipt support lands. Unlocking it means adding
+  a per-application receipt configuration (fixed template or per-request items),
+  sending it in `providers/yookassa.CreatePayment`, and covering it with an
+  emulator test.
+- **Read-through refresh on `GET /v1/payments/{id}`.** An unfinished payment is
+  refreshed from the provider when `next_check_at` has passed, so a correct
+  status is obtainable before the Stage 4 worker exists. The refresh is best
+  effort: a provider failure returns the stored state.
+- **Internal payment ids are UUIDs**, used directly in the API. There is no
+  `pay_` prefix layer.
+
+Open items:
+
+- Per-application `return_url` domain allowlist (`docs/SECURITY.md` §4).
+- Delivery-time re-validation of outbound addresses (`docs/SECURITY.md` §4).

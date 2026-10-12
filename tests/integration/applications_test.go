@@ -6,189 +6,21 @@
 //
 //	make test-integration
 //
-// These tests are the Stage 2 acceptance criterion: two applications with
-// different API keys authenticate independently and cannot reach each other's
-// data, and provider secrets are unreadable in the database.
+// Stage 2 acceptance: two applications with different API keys authenticate
+// independently and cannot reach each other's data, and provider secrets are
+// unreadable in the database.
 package integration
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/dmitriy-zverev/kazna/internal/applications"
-	"github.com/dmitriy-zverev/kazna/internal/config"
-	"github.com/dmitriy-zverev/kazna/internal/database"
-	httpserver "github.com/dmitriy-zverev/kazna/internal/http"
 	"github.com/dmitriy-zverev/kazna/internal/security"
 )
-
-const (
-	adminToken   = "test-admin-token"
-	providerBase = "http://127.0.0.1:1" // unreachable on purpose
-	masterKey    = "abababababababababababababababababababababababababababababababab"
-)
-
-type harness struct {
-	server *httptest.Server
-	pool   *pgxpool.Pool
-}
-
-type provisioned struct {
-	id            string
-	apiKey        string
-	webhookSecret string
-}
-
-func newHarness(t *testing.T) *harness { return newHarnessWith(t, false) }
-
-func newProductionHarness(t *testing.T) *harness { return newHarnessWith(t, true) }
-
-func newHarnessWith(t *testing.T, production bool) *harness {
-	t.Helper()
-	ctx := context.Background()
-
-	container, err := tcpostgres.Run(ctx, "postgres:17-alpine",
-		tcpostgres.WithDatabase("kazna"),
-		tcpostgres.WithUsername("kazna"),
-		tcpostgres.WithPassword("kazna"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(90*time.Second),
-		),
-	)
-	if err != nil {
-		t.Fatalf("start postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("connection string: %v", err)
-	}
-	if err := database.RunMigrations(dsn); err != nil {
-		t.Fatalf("migrations: %v", err)
-	}
-
-	pool, err := database.NewPool(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	cipher, err := security.NewCipher(masterKey, "")
-	if err != nil {
-		t.Fatalf("cipher: %v", err)
-	}
-
-	appEnv := "test"
-	if production {
-		appEnv = "production"
-	}
-
-	cfg := &config.Config{
-		AppEnv:          appEnv,
-		AdminToken:      adminToken,
-		YooKassaAPIURL:  providerBase,
-		LogLevel:        "error",
-		ShutdownTimeout: 5 * time.Second,
-	}
-
-	router := httpserver.NewRouter(httpserver.Deps{
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config:       cfg,
-		Health:       database.NewChecker(pool),
-		Applications: applications.NewService(pool, cipher, applications.Options{Production: production}),
-	})
-
-	server := httptest.NewServer(router)
-	t.Cleanup(server.Close)
-
-	return &harness{server: server, pool: pool}
-}
-
-func (h *harness) request(t *testing.T, method, path, token string, body any) (*http.Response, map[string]any) {
-	t.Helper()
-
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		reader = bytes.NewReader(encoded)
-	}
-
-	req, err := http.NewRequest(method, h.server.URL+path, reader)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := h.server.Client().Do(req)
-	if err != nil {
-		t.Fatalf("do request: %v", err)
-	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
-
-	raw, _ := io.ReadAll(resp.Body)
-	var decoded map[string]any
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &decoded)
-	}
-	return resp, decoded
-}
-
-// createApplication provisions an application through the admin API.
-func (h *harness) createApplication(t *testing.T, name string) provisioned {
-	t.Helper()
-	return h.createApplicationWith(t, map[string]any{"name": name})
-}
-
-func (h *harness) createApplicationWith(t *testing.T, payload map[string]any) provisioned {
-	t.Helper()
-
-	resp, body := h.request(t, http.MethodPost, "/admin/applications", adminToken, payload)
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create application: status %d, body %v", resp.StatusCode, body)
-	}
-
-	app, _ := body["application"].(map[string]any)
-	key, _ := body["api_key"].(map[string]any)
-
-	result := provisioned{
-		id:            stringField(app, "id"),
-		apiKey:        stringField(key, "api_key"),
-		webhookSecret: stringField(body, "webhook_secret"),
-	}
-	if result.id == "" || result.apiKey == "" || result.webhookSecret == "" {
-		t.Fatalf("create application: incomplete response %v", body)
-	}
-	return result
-}
-
-func stringField(m map[string]any, key string) string {
-	value, _ := m[key].(string)
-	return value
-}
 
 func TestTwoApplicationsAreIsolated(t *testing.T) {
 	h := newHarness(t)
@@ -352,39 +184,12 @@ func TestProviderConnectionStatusIsRecorded(t *testing.T) {
 	}
 }
 
-func (h *harness) attachProvider(t *testing.T, appID, shopID, secret string, isDefault bool) (*http.Response, map[string]any) {
-	t.Helper()
-	payload := map[string]any{
-		"provider":    "yookassa",
-		"shop_id":     shopID,
-		"secret_key":  secret,
-		"environment": "test",
-	}
-	if isDefault {
-		payload["is_default"] = true
-	}
-	return h.request(t, http.MethodPost, "/admin/applications/"+appID+"/providers", adminToken, payload)
-}
-
-func (h *harness) countDefaults(t *testing.T, appID string) int {
-	t.Helper()
-	var count int
-	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM application_providers WHERE application_id = $1 AND is_default`,
-		appID).Scan(&count); err != nil {
-		t.Fatalf("count defaults: %v", err)
-	}
-	return count
-}
-
 func TestOnlyOneDefaultProviderPerApplication(t *testing.T) {
 	h := newHarness(t)
 	app := h.createApplication(t, "SaaS")
 
 	for _, shop := range []string{"111", "222"} {
-		if resp, body := h.attachProvider(t, app.id, shop, "secret", true); resp.StatusCode != http.StatusCreated {
-			t.Fatalf("attach provider %s: status %d, body %v", shop, resp.StatusCode, body)
-		}
+		h.attachProvider(t, app.id, shop, "secret", true)
 	}
 
 	if got := h.countDefaults(t, app.id); got != 1 {
@@ -398,17 +203,13 @@ func TestReattachingProviderKeepsDefault(t *testing.T) {
 	h := newHarness(t)
 	app := h.createApplication(t, "SaaS")
 
-	if resp, body := h.attachProvider(t, app.id, "123456", "secret", true); resp.StatusCode != http.StatusCreated {
-		t.Fatalf("first attach: status %d, body %v", resp.StatusCode, body)
-	}
+	h.attachProvider(t, app.id, "123456", "secret", true)
 	if got := h.countDefaults(t, app.id); got != 1 {
 		t.Fatalf("default count after first attach = %d, want 1", got)
 	}
 
 	// Same shop, same secret, is_default omitted.
-	if resp, body := h.attachProvider(t, app.id, "123456", "secret", false); resp.StatusCode != http.StatusCreated {
-		t.Fatalf("second attach: status %d, body %v", resp.StatusCode, body)
-	}
+	h.attachProvider(t, app.id, "123456", "secret", false)
 	if got := h.countDefaults(t, app.id); got != 1 {
 		t.Fatalf("default count after re-attach = %d, want 1 (regression: default was cleared)", got)
 	}
@@ -420,11 +221,14 @@ func TestReattachingProviderWithDifferentSecretIsRejected(t *testing.T) {
 	h := newHarness(t)
 	app := h.createApplication(t, "SaaS")
 
-	if resp, body := h.attachProvider(t, app.id, "123456", "original-secret", true); resp.StatusCode != http.StatusCreated {
-		t.Fatalf("first attach: status %d, body %v", resp.StatusCode, body)
-	}
+	h.attachProvider(t, app.id, "123456", "original-secret", true)
 
-	resp, body := h.attachProvider(t, app.id, "123456", "different-secret", false)
+	resp, body := h.request(t, http.MethodPost, "/admin/applications/"+app.id+"/providers", adminToken, map[string]any{
+		"provider":    "yookassa",
+		"shop_id":     "123456",
+		"secret_key":  "different-secret",
+		"environment": "test",
+	})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409 when the secret differs; body %v", resp.StatusCode, body)
 	}

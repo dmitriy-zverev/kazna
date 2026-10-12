@@ -206,7 +206,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreatePaymentRequest"
+              $ref: "#/components/schemas/CreatePaymentAttemptRequest"
       responses:
         "201":
           description: New payment attempt created
@@ -588,8 +588,8 @@ components:
       required: true
       schema:
         type: string
-        pattern: "^pay_[A-Za-z0-9]+$"
-        example: pay_abc123
+        format: uuid
+        example: 0f6a2e00-000f-5000-8000-1a2b3c4d5e6f
     ApplicationID:
       name: application_id
       in: path
@@ -690,6 +690,32 @@ components:
           description: Must match an allowed domain of the application.
         customer:
           $ref: "#/components/schemas/Customer"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          maxProperties: 20
+
+    CreatePaymentAttemptRequest:
+      type: object
+      required: [amount, currency]
+      description: Same as CreatePaymentRequest without order_id, which comes from the path.
+      properties:
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount in minor units (kopecks).
+          example: 49900
+        currency:
+          type: string
+          enum: [RUB]
+        description:
+          type: string
+          maxLength: 128
+        return_url:
+          type: string
+          format: uri
         metadata:
           type: object
           additionalProperties:
@@ -1006,5 +1032,6 @@ components:
         - PROVIDER_UNAVAILABLE
         - PROVIDER_TIMEOUT
         - PROVIDER_AUTH_FAILED
+        - PROVIDER_NOT_CONFIGURED
         - PAYMENT_STATE_UNKNOWN
         - INTERNAL_ERROR

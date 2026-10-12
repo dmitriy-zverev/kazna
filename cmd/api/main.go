@@ -16,9 +16,37 @@ import (
 	"github.com/dmitriy-zverev/kazna/internal/database"
 	httpserver "github.com/dmitriy-zverev/kazna/internal/http"
 	"github.com/dmitriy-zverev/kazna/internal/logging"
+	"github.com/dmitriy-zverev/kazna/internal/metrics"
+	"github.com/dmitriy-zverev/kazna/internal/payments"
+	"github.com/dmitriy-zverev/kazna/internal/providers"
+	"github.com/dmitriy-zverev/kazna/internal/providers/yookassa"
 	"github.com/dmitriy-zverev/kazna/internal/security"
 	"github.com/dmitriy-zverev/kazna/internal/version"
 )
+
+// unfinishedInterval is how often the unfinished-payments gauge is refreshed.
+const unfinishedInterval = 15 * time.Second
+
+// publishUnfinished keeps kazna_unfinished_payments current. A gauge cannot be
+// derived from an increment, so it is polled rather than counted.
+func publishUnfinished(ctx context.Context, logger *slog.Logger, svc *payments.Service, registry *metrics.Metrics) {
+	ticker := time.NewTicker(unfinishedInterval)
+	defer ticker.Stop()
+
+	for {
+		if count, err := svc.UnfinishedCount(ctx); err == nil {
+			registry.SetUnfinished(count)
+		} else if ctx.Err() == nil {
+			logger.Warn("api: cannot read unfinished payments", slog.Any("error", err))
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -58,10 +86,25 @@ func run() error {
 		return err
 	}
 
+	registry := metrics.New()
 	apps := applications.NewService(pool, cipher, applications.Options{Production: cfg.IsProduction()})
 	if !cfg.AdminEnabled() {
 		logger.Warn("api: admin API is disabled because ADMIN_TOKEN is not set")
 	}
+
+	// One provider client per account, built from the decrypted credentials.
+	providerClients := func(shopID, secretKey string) providers.Client {
+		return yookassa.NewClient(cfg.YooKassaAPIURL, shopID, secretKey)
+	}
+	paymentService := payments.NewService(pool, apps, providerClients, payments.Options{
+		Production:                cfg.IsProduction(),
+		ProviderIdempotencyWindow: cfg.ProviderIdempotencyWindow,
+		ProviderTimeout:           10 * time.Second,
+		PollBaseInterval:          cfg.PaymentPollInterval,
+		Recorder:                  registry,
+	})
+
+	go publishUnfinished(ctx, logger, paymentService, registry)
 
 	srv := &nethttp.Server{
 		Addr: cfg.HTTPAddr,
@@ -70,6 +113,8 @@ func run() error {
 			Config:       cfg,
 			Health:       database.NewChecker(pool),
 			Applications: apps,
+			Payments:     paymentService,
+			Metrics:      registry,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

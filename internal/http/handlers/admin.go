@@ -12,6 +12,7 @@ import (
 	"github.com/dmitriy-zverev/kazna/internal/applications"
 	"github.com/dmitriy-zverev/kazna/internal/http/dto"
 	"github.com/dmitriy-zverev/kazna/internal/http/respond"
+	"github.com/dmitriy-zverev/kazna/internal/providers"
 	"github.com/dmitriy-zverev/kazna/internal/providers/yookassa"
 )
 
@@ -225,8 +226,8 @@ func (h *Admin) testProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func providerReason(err error) string {
-	if provErr, ok := yookassa.AsError(err); ok {
-		return provErr.Code
+	if provErr, ok := providers.AsError(err); ok {
+		return string(provErr.Code)
 	}
 	return respond.CodeProviderUnavailable
 }

@@ -40,6 +40,52 @@ type ApplicationProvider struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type IdempotencyRequest struct {
+	ID             pgtype.UUID        `json:"id"`
+	ApplicationID  pgtype.UUID        `json:"application_id"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    []byte             `json:"request_hash"`
+	PaymentID      pgtype.UUID        `json:"payment_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type Payment struct {
+	ID                pgtype.UUID        `json:"id"`
+	ApplicationID     pgtype.UUID        `json:"application_id"`
+	ProviderAccountID pgtype.UUID        `json:"provider_account_id"`
+	OrderID           string             `json:"order_id"`
+	AttemptNumber     int32              `json:"attempt_number"`
+	Provider          string             `json:"provider"`
+	ProviderPaymentID *string            `json:"provider_payment_id"`
+	AmountMinor       int64              `json:"amount_minor"`
+	Currency          string             `json:"currency"`
+	Description       string             `json:"description"`
+	Status            string             `json:"status"`
+	CheckoutUrl       *string            `json:"checkout_url"`
+	ReturnUrl         *string            `json:"return_url"`
+	Metadata          []byte             `json:"metadata"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	NextCheckAt       pgtype.Timestamptz `json:"next_check_at"`
+}
+
+type PaymentOperation struct {
+	ID                     pgtype.UUID        `json:"id"`
+	PaymentID              pgtype.UUID        `json:"payment_id"`
+	OperationType          string             `json:"operation_type"`
+	ProviderIdempotencyKey string             `json:"provider_idempotency_key"`
+	RequestHash            []byte             `json:"request_hash"`
+	RequestBody            []byte             `json:"request_body"`
+	Status                 string             `json:"status"`
+	AttemptCount           int32              `json:"attempt_count"`
+	LastError              *string            `json:"last_error"`
+	IdempotencyExpiresAt   pgtype.Timestamptz `json:"idempotency_expires_at"`
+	StartedAt              pgtype.Timestamptz `json:"started_at"`
+	CompletedAt            pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProviderAccount struct {
 	ID                 pgtype.UUID        `json:"id"`
 	Provider           string             `json:"provider"`

@@ -15,6 +15,8 @@ import (
 	"github.com/dmitriy-zverev/kazna/internal/http/handlers"
 	"github.com/dmitriy-zverev/kazna/internal/http/middleware"
 	"github.com/dmitriy-zverev/kazna/internal/http/respond"
+	"github.com/dmitriy-zverev/kazna/internal/metrics"
+	"github.com/dmitriy-zverev/kazna/internal/payments"
 )
 
 // Deps are the collaborators the router needs. Passing them explicitly keeps
@@ -24,11 +26,14 @@ type Deps struct {
 	Config       *config.Config
 	Health       handlers.Pinger
 	Applications *applications.Service
+	Payments     *payments.Service
+	Metrics      *metrics.Metrics
 }
 
 // NewRouter builds the API handler tree.
 //
 //	/health/*  probes, unauthenticated
+//	/metrics   Prometheus exposition, unauthenticated but not publicly exposed
 //	/v1/*      application API, authenticated by API key
 //	/admin/*   administrative API, authenticated by the admin token
 func NewRouter(d Deps) nethttp.Handler {
@@ -37,6 +42,9 @@ func NewRouter(d Deps) nethttp.Handler {
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.RequestLogger(d.Logger))
+	if d.Metrics != nil {
+		r.Use(middleware.Metrics(d.Metrics))
+	}
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
 
@@ -50,12 +58,18 @@ func NewRouter(d Deps) nethttp.Handler {
 
 	r.Get("/health/live", handlers.Live)
 	r.Get("/health/ready", handlers.Ready(d.Health))
+	if d.Metrics != nil {
+		r.Method(nethttp.MethodGet, "/metrics", d.Metrics.Handler())
+	}
 
 	authenticator := auth.New(d.Applications)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(authenticator.RequireApplication)
 		r.Get("/me", handlers.Me)
+		if d.Payments != nil {
+			handlers.NewPayments(d.Payments).Register(r)
+		}
 	})
 
 	admin := handlers.NewAdmin(d.Applications, d.Config.YooKassaAPIURL)

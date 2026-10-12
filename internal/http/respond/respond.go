@@ -20,6 +20,7 @@ const (
 	CodeProviderUnavailable     = "PROVIDER_UNAVAILABLE"
 	CodeProviderTimeout         = "PROVIDER_TIMEOUT"
 	CodeProviderAuthFailed      = "PROVIDER_AUTH_FAILED"
+	CodeProviderNotConfigured   = "PROVIDER_NOT_CONFIGURED"
 	CodePaymentStateUnknown     = "PAYMENT_STATE_UNKNOWN"
 	CodeInternalError           = "INTERNAL_ERROR"
 )
